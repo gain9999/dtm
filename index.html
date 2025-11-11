@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thailand DTM Viewer</title>
+    <link rel="stylesheet" href="./vendor/leaflet.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #101014;
+        color: #f7f7f8;
+      }
+
+      #app {
+        position: relative;
+        height: 100%;
+        width: 100%;
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+        position: relative;
+        z-index: 0;
+      }
+
+      .status {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(10, 10, 16, 0.9);
+        padding: 10px 18px;
+        border-radius: 999px;
+        font-size: 14px;
+        letter-spacing: 0.02em;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+        z-index: 600;
+        transition: opacity 0.3s ease;
+      }
+
+      .status.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .progress-indicator {
+        position: absolute;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(10, 10, 16, 0.9);
+        padding: 8px 14px;
+        border-radius: 999px;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        z-index: 600;
+        transition: opacity 0.2s ease;
+      }
+
+      .progress-indicator.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .search-control {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 600;
+      }
+
+      .search-control form {
+        display: flex;
+        gap: 8px;
+        background: rgba(10, 10, 16, 0.92);
+        padding: 6px 10px;
+        border-radius: 8px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      }
+
+      .search-control input {
+        border: none;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f2f2f5;
+        padding: 6px 10px;
+        border-radius: 6px;
+        width: 200px;
+        font-size: 13px;
+      }
+
+      .search-control button {
+        border: none;
+        background: #4da3ff;
+        color: #0a0a10;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .legend {
+        position: absolute;
+        bottom: 16px;
+        left: 16px;
+        background: rgba(10, 10, 16, 0.92);
+        border-radius: 12px;
+        padding: 14px 16px;
+        width: 240px;
+        z-index: 500;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      .legend h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .legend p {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: #aaa;
+      }
+
+      .colorbar {
+        margin-top: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: linear-gradient(
+          90deg,
+          #274060,
+          #387780,
+          #78a890,
+          #c1d37f,
+          #e6b566,
+          #e26b5f
+        );
+      }
+
+      .range {
+        margin-top: 6px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        color: #d7d7dc;
+      }
+
+      .slider-control {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #d0d0d6;
+      }
+
+      .slider-control input[type="range"] {
+        width: 100%;
+        accent-color: #5ab0ff;
+      }
+
+      .toggle-control {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #d0d0d6;
+      }
+
+      .toggle-control input[type="checkbox"] {
+        accent-color: #4da3ff;
+      }
+
+      .citation {
+        margin-top: 14px;
+        font-size: 11px;
+        color: #b8b8bf;
+        line-height: 1.4;
+      }
+
+      .citation a {
+        color: #7ec9ff;
+        text-decoration: none;
+      }
+
+      .cell-value {
+        color: #f7f7f8;
+        font-size: 11px;
+        font-weight: 600;
+        text-shadow: 0 0 4px rgba(0, 0, 0, 0.85);
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="map"></div>
+      <div class="search-control">
+        <form id="search-form">
+          <input
+            type="text"
+            id="search-input"
+            placeholder="Search city or lat,lon"
+            autocomplete="off"
+          />
+          <button type="submit">Go</button>
+        </form>
+      </div>
+      <div id="status" class="status">Booting DTM visualizer…</div>
+      <div id="progress-indicator" class="progress-indicator hidden">
+        Downloading DEM… <span id="progress-value">0%</span>
+      </div>
+      <aside class="legend">
+        <h2>Thailand Digital Terrain Model</h2>
+        <p id="legend-note">Awaiting dataset stats…</p>
+        <div class="colorbar"></div>
+        <div class="range">
+          <span id="legend-min">…</span>
+          <span id="legend-max">…</span>
+        </div>
+        <div class="slider-control">
+          <label for="max-slider">Max elevation</label>
+          <input
+            type="range"
+            id="max-slider"
+            min="0"
+            max="1000"
+            value="1000"
+            step="1"
+            disabled
+          />
+          <span id="slider-value">…</span>
+        </div>
+        <div class="slider-control">
+          <label for="opacity-slider">Opacity</label>
+          <input
+            type="range"
+            id="opacity-slider"
+            min="10"
+            max="100"
+            value="70"
+            step="5"
+          />
+          <span id="opacity-value">70%</span>
+        </div>
+        <label class="toggle-control">
+          <input type="checkbox" id="multi-select-toggle" />
+          <span>Enable multi-tiles selection</span>
+        </label>
+        <p class="citation">
+          <a
+            href="https://doi.org/10.5281/zenodo.14900181"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Ho, Y., &amp; Hengl, T. (2025). Global Ensemble Digital Terrain Model 30m
+            (GEDTM30).
+          </a>
+        </p>
+      </aside>
+    </div>
+
+    <script src="./vendor/leaflet.js"></script>
+    <script src="./vendor/geotiff.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
