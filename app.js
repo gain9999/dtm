@@ -22,6 +22,8 @@ const searchInput = document.getElementById("search-input");
 const progressEl = document.getElementById("progress-indicator");
 const progressValueEl = document.getElementById("progress-value");
 const multiSelectToggle = document.getElementById("multi-select-toggle");
+const legendEl = document.querySelector(".legend");
+const legendToggleEl = document.getElementById("legend-toggle");
 
 const originalFetch = window.fetch.bind(window);
 let activeDownloadTracker = null;
@@ -395,6 +397,25 @@ const updateLegend = (min, max, note) => {
     colorbarEl.style.background = buildGradient(min, max);
   }
 };
+
+const syncLegendToggleState = () => {
+  if (!legendToggleEl || !legendEl) return;
+  const collapsed = legendEl.classList.contains("collapsed");
+  legendToggleEl.textContent = "X";
+  legendToggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  legendToggleEl.setAttribute(
+    "aria-label",
+    collapsed ? "Expand legend panel" : "Collapse legend panel"
+  );
+};
+
+if (legendToggleEl && legendEl) {
+  legendToggleEl.addEventListener("click", () => {
+    legendEl.classList.toggle("collapsed");
+    syncLegendToggleState();
+  });
+  syncLegendToggleState();
+}
 
 const disableSlider = () => {
   if (maxSliderEl) {

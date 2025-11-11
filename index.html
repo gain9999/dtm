@@ -116,9 +116,22 @@
         background: rgba(10, 10, 16, 0.92);
         border-radius: 12px;
         padding: 14px 16px;
-        width: 240px;
+        width: 300px;
         z-index: 500;
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+        transition: box-shadow 0.2s ease, transform 0.2s ease;
+      }
+
+      .legend.collapsed {
+        padding-bottom: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      }
+
+      .legend-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
       }
 
       .legend h2 {
@@ -126,6 +139,32 @@
         font-size: 15px;
         font-weight: 600;
         letter-spacing: 0.04em;
+      }
+
+      .legend-toggle {
+        border: none;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f7f7f8;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .legend-toggle:hover,
+      .legend-toggle:focus-visible {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+      }
+
+      .legend-content {
+        margin-top: 12px;
+      }
+
+      .legend.collapsed .legend-content {
+        display: none;
       }
 
       .legend p {
@@ -226,52 +265,65 @@
         Downloading DEM… <span id="progress-value">0%</span>
       </div>
       <aside class="legend">
-        <h2>Thailand Digital Terrain Model</h2>
-        <p id="legend-note">Awaiting dataset stats…</p>
-        <div class="colorbar"></div>
-        <div class="range">
-          <span id="legend-min">…</span>
-          <span id="legend-max">…</span>
-        </div>
-        <div class="slider-control">
-          <label for="max-slider">Max elevation</label>
-          <input
-            type="range"
-            id="max-slider"
-            min="0"
-            max="1000"
-            value="1000"
-            step="1"
-            disabled
-          />
-          <span id="slider-value">…</span>
-        </div>
-        <div class="slider-control">
-          <label for="opacity-slider">Opacity</label>
-          <input
-            type="range"
-            id="opacity-slider"
-            min="10"
-            max="100"
-            value="70"
-            step="5"
-          />
-          <span id="opacity-value">70%</span>
-        </div>
-        <label class="toggle-control">
-          <input type="checkbox" id="multi-select-toggle" />
-          <span>Enable multi-tiles selection</span>
-        </label>
-        <p class="citation">
-          <a
-            href="https://doi.org/10.5281/zenodo.14900181"
-            target="_blank"
-            rel="noreferrer"
+        <div class="legend-header">
+          <h2>Thailand Digital Terrain Model</h2>
+          <button
+            type="button"
+            id="legend-toggle"
+            class="legend-toggle"
+            aria-expanded="true"
+            aria-controls="legend-content"
           >
-            Ho, Y., &amp; Hengl, T. (2025). Global Ensemble Digital Terrain Model 30m
-            (GEDTM30).
-          </a>
-        </p>
+            X
+          </button>
+        </div>
+        <div id="legend-content" class="legend-content">
+          <p id="legend-note">Awaiting dataset stats…</p>
+          <div class="colorbar"></div>
+          <div class="range">
+            <span id="legend-min">…</span>
+            <span id="legend-max">…</span>
+          </div>
+          <div class="slider-control">
+            <label for="max-slider">Max elevation</label>
+            <input
+              type="range"
+              id="max-slider"
+              min="0"
+              max="1000"
+              value="1000"
+              step="1"
+              disabled
+            />
+            <span id="slider-value">…</span>
+          </div>
+          <div class="slider-control">
+            <label for="opacity-slider">Opacity</label>
+            <input
+              type="range"
+              id="opacity-slider"
+              min="10"
+              max="100"
+              value="70"
+              step="5"
+            />
+            <span id="opacity-value">70%</span>
+          </div>
+          <label class="toggle-control">
+            <input type="checkbox" id="multi-select-toggle" />
+            <span>Enable multi-tiles selection</span>
+          </label>
+          <p class="citation">
+            <a
+              href="https://doi.org/10.5281/zenodo.14900181"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Ho, Y., &amp; Hengl, T. (2025). Global Ensemble Digital Terrain Model 30m
+              (GEDTM30).
+            </a>
+          </p>
+        </div>
       </aside>
     </div>
 
