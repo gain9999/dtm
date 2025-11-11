@@ -6,6 +6,7 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - Streams the GEDTM30 v1.2 DEM for Thailand from OpenGeoHub via GeoTIFF.js and renders it as a colorized raster overlay.
 - Leaflet grid that highlights selectable ~0.02° cells; clicking a cell downloads only the needed pixels and keeps memory use low.
 - Elevation legend with automatic min/max stats, adjustable max-value stretch slider, and opacity control for blending with the OpenStreetMap base layer.
+- Flood-extent tooling: raise a water-height slider, configure the base river level and the minimum number of low cells that seed rivers, and instantly see connected flood regions tinted on the map with a live cell count.
 - City/province search (including aliases and `lat,lon` queries) plus on-map sampling to inspect exact elevation values.
 - Optional multi-select mode to show and compare several DEM tiles at once, with aggregated stats in the legend.
 - Download progress indicator with byte-based tracking so large tiles feel responsive.
@@ -28,6 +29,8 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - **Grid click**: Streams and colorizes the DEM cell; click inside the colored area to sample exact elevation via popup.
 - **Max elevation slider**: Recomputes the color ramp to emphasize lower relief or remove outliers; resets when changing tiles unless multi-select is on.
 - **Opacity slider**: Adjusts how strongly the raster overlay covers the OSM basemap.
+- **Water height slider**: Expands connected flood regions by virtually raising the water surface; tinted pixels and the connected-cell counter update live.
+- **Base river level / Min river cells**: Numeric inputs that control which low-lying components seed flood growth so you can focus on major rivers or explore smaller tributaries.
 - **Multi-select toggle**: Keeps previously fetched cells on the map and aggregates stats in the legend.
 - **Search**: Supports Thai province names, common aliases, or explicit `latitude,longitude` pairs.
 
