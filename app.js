@@ -17,6 +17,11 @@ const maxSliderEl = document.getElementById("max-slider");
 const sliderValueEl = document.getElementById("slider-value");
 const opacitySliderEl = document.getElementById("opacity-slider");
 const opacityValueEl = document.getElementById("opacity-value");
+const riverSliderEl = document.getElementById("river-slider");
+const riverSliderValueEl = document.getElementById("river-slider-value");
+const floodCellCountEl = document.getElementById("flood-cell-count");
+const riverBaseInputEl = document.getElementById("river-base-input");
+const riverSeedInputEl = document.getElementById("river-seed-input");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
 const progressEl = document.getElementById("progress-indicator");
@@ -224,6 +229,16 @@ let selectionBounds = null;
 let currentTileData = null;
 let sliderOverride = null;
 let currentOpacity = 0.7;
+const DEFAULT_BASE_RIVER_LEVEL = 3;
+const MIN_BASE_RIVER_LEVEL = 0;
+const MAX_BASE_RIVER_LEVEL = 20;
+const DEFAULT_MIN_RIVER_SEED_CELLS = 30;
+const MAX_RIVER_SEED_CELLS = 5000;
+const FLOOD_TINT = [79, 196, 255];
+const FLOOD_TINT_WEIGHT = 0.65;
+let baseRiverLevel = DEFAULT_BASE_RIVER_LEVEL;
+let riverLevel = DEFAULT_BASE_RIVER_LEVEL;
+let minRiverSeedCells = DEFAULT_MIN_RIVER_SEED_CELLS;
 let imagePromise = null;
 let imageMetadata = null;
 let pendingRequestId = 0;
@@ -300,7 +315,11 @@ const configureSlider = () => {
 };
 
 const createOverlayEntry = (tileData) => {
-  const { url, max } = generateOverlayDataUrl(tileData, sliderOverride);
+  const { url, max, floodCellCount } = generateOverlayDataUrl(
+    tileData,
+    sliderOverride,
+    riverLevel
+  );
   const layer = L.imageOverlay(url, tileData.bounds, {
     opacity: currentOpacity,
     interactive: false,
@@ -315,6 +334,7 @@ const createOverlayEntry = (tileData) => {
     tileData,
     effectiveMax: max,
     isOverride: sliderOverride !== null,
+    floodCellCount,
   };
 };
 
@@ -334,6 +354,7 @@ const reRenderOverlays = () => {
 const updateLegendFromOverlays = () => {
   if (overlays.length === 0) {
     updateLegend(-50, 4000, "Click a grid cell to stream DEM data.");
+    updateFloodSummary();
     return;
   }
   const aggregatedMin = overlays.reduce(
@@ -361,6 +382,7 @@ const updateLegendFromOverlays = () => {
     note = "Combined stats for selected cells.";
   }
   updateLegend(aggregatedMin, aggregatedMax, note);
+  updateFloodSummary();
 };
 
 const clearOverlays = () => {
@@ -374,6 +396,16 @@ const clearOverlays = () => {
 
 const formatElevation = (value) =>
   Number.isFinite(value) ? `${Math.round(value).toLocaleString()} m` : "n/a";
+const formatElevationPrecise = (value) =>
+  Number.isFinite(value)
+    ? `${value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} m`
+    : "n/a";
+
+const formatWaterLevel = (value) =>
+  Number.isFinite(value) ? `${value.toFixed(1)} m` : "n/a";
 
 const rgbToCss = ([r, g, b]) => `rgb(${r}, ${g}, ${b})`;
 
@@ -389,6 +421,113 @@ const buildGradient = (min, max) => {
   return `linear-gradient(90deg, ${stops.join(", ")})`;
 };
 
+const blendColors = (base, tint, tintWeight = FLOOD_TINT_WEIGHT) => {
+  const clampedWeight = Math.max(0, Math.min(1, tintWeight));
+  const baseWeight = 1 - clampedWeight;
+  return [
+    Math.round(base[0] * baseWeight + tint[0] * clampedWeight),
+    Math.round(base[1] * baseWeight + tint[1] * clampedWeight),
+    Math.round(base[2] * baseWeight + tint[2] * clampedWeight),
+  ];
+};
+
+const computeConnectedFloodMask = (
+  tileData,
+  waterLevel,
+  baseThreshold = baseRiverLevel
+) => {
+  const { width, height, values, noData } = tileData;
+  const totalCells = width * height;
+  const mask = new Uint8Array(totalCells);
+  if (!Number.isFinite(waterLevel) || totalCells === 0) {
+    return { mask, count: 0 };
+  }
+  const effectiveWaterLevel = Math.max(waterLevel, baseThreshold);
+  const queue = [];
+  const visited = new Uint8Array(totalCells);
+  const directions = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+  const neighbors = (idx) => {
+    const row = Math.floor(idx / width);
+    const col = idx % width;
+    return directions
+      .map(([dr, dc]) => [row + dr, col + dc])
+      .filter(
+        ([r, c]) => r >= 0 && r < height && c >= 0 && c < width
+      )
+      .map(([r, c]) => r * width + c);
+  };
+
+  for (let idx = 0; idx < totalCells; idx += 1) {
+    if (visited[idx]) continue;
+    const elevation = values[idx];
+    if (!Number.isFinite(elevation) || elevation === noData) {
+      visited[idx] = 1;
+      continue;
+    }
+    if (elevation > baseThreshold) {
+      visited[idx] = 1;
+      continue;
+    }
+    const component = [];
+    const stack = [idx];
+    visited[idx] = 1;
+    while (stack.length) {
+      const current = stack.pop();
+      component.push(current);
+      for (const neighborIdx of neighbors(current)) {
+        if (visited[neighborIdx]) continue;
+        const neighborElevation = values[neighborIdx];
+        visited[neighborIdx] = 1;
+        if (
+          !Number.isFinite(neighborElevation) ||
+          neighborElevation === noData ||
+          neighborElevation > baseThreshold
+        ) {
+          continue;
+        }
+        stack.push(neighborIdx);
+      }
+    }
+    if (component.length >= minRiverSeedCells) {
+      for (const cellIdx of component) {
+        mask[cellIdx] = 1;
+        queue.push(cellIdx);
+      }
+    }
+  }
+  let count = queue.length;
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    const row = Math.floor(current / width);
+    const col = current % width;
+    const adjacent = [
+      [row - 1, col],
+      [row + 1, col],
+      [row, col - 1],
+      [row, col + 1],
+    ];
+    for (const [r, c] of adjacent) {
+      if (r < 0 || r >= height || c < 0 || c >= width) continue;
+      const idx = r * width + c;
+      if (mask[idx] === 1) continue;
+      const elevation = values[idx];
+      if (!Number.isFinite(elevation) || elevation === noData) continue;
+      if (elevation <= effectiveWaterLevel) {
+        mask[idx] = 1;
+        queue.push(idx);
+        count += 1;
+      }
+    }
+  }
+  return { mask, count };
+};
+
 const updateLegend = (min, max, note) => {
   if (legendNoteEl) legendNoteEl.textContent = note;
   if (legendMinEl) legendMinEl.textContent = formatElevation(min);
@@ -396,6 +535,15 @@ const updateLegend = (min, max, note) => {
   if (colorbarEl) {
     colorbarEl.style.background = buildGradient(min, max);
   }
+};
+
+const updateFloodSummary = () => {
+  if (!floodCellCountEl) return;
+  const totalFloodCells = overlays.reduce(
+    (sum, entry) => sum + (entry.floodCellCount ?? 0),
+    0
+  );
+  floodCellCountEl.textContent = totalFloodCells.toLocaleString();
 };
 
 const syncLegendToggleState = () => {
@@ -409,11 +557,27 @@ const syncLegendToggleState = () => {
   );
 };
 
+const toggleLegend = () => {
+  if (!legendEl) return;
+  legendEl.classList.toggle("collapsed");
+  syncLegendToggleState();
+};
+
 if (legendToggleEl && legendEl) {
-  legendToggleEl.addEventListener("click", () => {
-    legendEl.classList.toggle("collapsed");
-    syncLegendToggleState();
+  legendToggleEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleLegend();
   });
+  legendToggleEl.addEventListener(
+    "touchend",
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleLegend();
+    },
+    { passive: false }
+  );
   syncLegendToggleState();
 }
 
@@ -425,6 +589,67 @@ const disableSlider = () => {
 };
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const normalizeBaseRiverLevel = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_BASE_RIVER_LEVEL;
+  }
+  return clamp(parsed, MIN_BASE_RIVER_LEVEL, MAX_BASE_RIVER_LEVEL);
+};
+const applyBaseRiverLevel = (value, { silent = false } = {}) => {
+  const normalized = normalizeBaseRiverLevel(value);
+  baseRiverLevel = normalized;
+  if (riverBaseInputEl) {
+    riverBaseInputEl.value = normalized.toFixed(1);
+  }
+  if (riverLevel < baseRiverLevel) {
+    riverLevel = baseRiverLevel;
+    if (riverSliderEl) {
+      riverSliderEl.value = riverLevel;
+    }
+    updateRiverSliderDisplay();
+  }
+  if (overlays.length > 0) {
+    reRenderOverlays();
+  } else {
+    updateFloodSummary();
+  }
+  if (!silent) {
+    setStatus(`Base river level set to ${formatWaterLevel(baseRiverLevel)}`);
+  }
+  return normalized;
+};
+const handleRiverBaseInput = () => {
+  if (!riverBaseInputEl) return;
+  applyBaseRiverLevel(riverBaseInputEl.value);
+};
+const normalizeRiverSeedValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MIN_RIVER_SEED_CELLS;
+  }
+  return clamp(Math.round(parsed), 1, MAX_RIVER_SEED_CELLS);
+};
+const applyMinRiverSeedCells = (value, { silent = false } = {}) => {
+  const normalized = normalizeRiverSeedValue(value);
+  minRiverSeedCells = normalized;
+  if (riverSeedInputEl) {
+    riverSeedInputEl.value = String(normalized);
+  }
+  if (overlays.length > 0) {
+    reRenderOverlays();
+  } else {
+    updateFloodSummary();
+  }
+  if (!silent) {
+    setStatus(`Min river cells set to ${normalized.toLocaleString()}`);
+  }
+  return normalized;
+};
+const handleRiverSeedInput = () => {
+  if (!riverSeedInputEl) return;
+  applyMinRiverSeedCells(riverSeedInputEl.value);
+};
 const clampLatLon = ([lat, lon]) => {
   const latClamped = clamp(lat, THAILAND_BOUNDS[0][0], THAILAND_BOUNDS[1][0]);
   const lonClamped = clamp(lon, THAILAND_BOUNDS[0][1], THAILAND_BOUNDS[1][1]);
@@ -479,7 +704,11 @@ const DEFAULT_CELL_NOTE =
 const sliderNote = (value) =>
   `Stats for selected cell (~0.02°). Slider max: ${formatElevation(value)}.`;
 
-const generateOverlayDataUrl = (tileData, maxValue) => {
+const generateOverlayDataUrl = (
+  tileData,
+  maxValue,
+  waterLevel = baseRiverLevel
+) => {
   const { values, width, height, min, max, noData } = tileData;
   const effectiveMax = clamp(
     maxValue ?? max,
@@ -492,6 +721,10 @@ const generateOverlayDataUrl = (tileData, maxValue) => {
   const ctx = canvas.getContext("2d");
   const imageData = ctx.createImageData(width, height);
   const out = imageData.data;
+  const { mask, count: floodCellCount } = computeConnectedFloodMask(
+    tileData,
+    waterLevel
+  );
 
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i];
@@ -501,14 +734,19 @@ const generateOverlayDataUrl = (tileData, maxValue) => {
       continue;
     }
     const [r, g, b] = valueToColor(value, min, effectiveMax);
-    out[offset] = r;
-    out[offset + 1] = g;
-    out[offset + 2] = b;
+    const color = mask[i] === 1 ? blendColors([r, g, b], FLOOD_TINT) : [r, g, b];
+    out[offset] = color[0];
+    out[offset + 1] = color[1];
+    out[offset + 2] = color[2];
     out[offset + 3] = 255;
   }
 
   ctx.putImageData(imageData, 0, 0);
-  return { url: canvas.toDataURL("image/png"), max: effectiveMax };
+  return {
+    url: canvas.toDataURL("image/png"),
+    max: effectiveMax,
+    floodCellCount,
+  };
 };
 
 const applyOverlayFromTile = (tileData) => {
@@ -555,6 +793,68 @@ const handleOpacityInput = () => {
 if (opacitySliderEl) {
   opacitySliderEl.addEventListener("input", handleOpacityInput);
   handleOpacityInput();
+}
+
+const updateRiverSliderDisplay = () => {
+  if (riverSliderValueEl) {
+    riverSliderValueEl.textContent = formatWaterLevel(riverLevel);
+  }
+};
+
+const handleRiverSliderInput = () => {
+  if (!riverSliderEl) return;
+  const nextValue = Number(riverSliderEl.value);
+  riverLevel = Number.isFinite(nextValue)
+    ? Math.max(baseRiverLevel, nextValue)
+    : baseRiverLevel;
+  riverSliderEl.value = riverLevel;
+  updateRiverSliderDisplay();
+  if (overlays.length > 0) {
+    reRenderOverlays();
+  } else {
+    updateFloodSummary();
+  }
+  setStatus(`Water height set to ${formatWaterLevel(riverLevel)}`);
+};
+
+if (riverBaseInputEl) {
+  applyBaseRiverLevel(riverBaseInputEl.value, { silent: true });
+  riverBaseInputEl.addEventListener("change", handleRiverBaseInput);
+  riverBaseInputEl.addEventListener("blur", handleRiverBaseInput);
+  riverBaseInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleRiverBaseInput();
+    }
+  });
+} else {
+  applyBaseRiverLevel(DEFAULT_BASE_RIVER_LEVEL, { silent: true });
+}
+
+if (riverSliderEl) {
+  const initialValue = Number(riverSliderEl.value);
+  riverLevel = Number.isFinite(initialValue)
+    ? Math.max(baseRiverLevel, initialValue)
+    : baseRiverLevel;
+  riverSliderEl.value = riverLevel;
+  updateRiverSliderDisplay();
+  riverSliderEl.addEventListener("input", handleRiverSliderInput);
+} else {
+  updateRiverSliderDisplay();
+}
+
+if (riverSeedInputEl) {
+  applyMinRiverSeedCells(riverSeedInputEl.value, { silent: true });
+  riverSeedInputEl.addEventListener("change", handleRiverSeedInput);
+  riverSeedInputEl.addEventListener("blur", handleRiverSeedInput);
+  riverSeedInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleRiverSeedInput();
+    }
+  });
+} else {
+  applyMinRiverSeedCells(DEFAULT_MIN_RIVER_SEED_CELLS, { silent: true });
 }
 
 async function getImage() {
@@ -791,7 +1091,9 @@ map.on("click", (event) => {
   }
   popup
     .setLatLng(latlng)
-    .setContent(`Elevation<br><strong>${formatElevation(value)}</strong>`)
+    .setContent(
+      `Elevation<br><strong>${formatElevationPrecise(value)}</strong>`
+    )
     .openOn(map);
 });
 

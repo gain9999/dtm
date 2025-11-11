@@ -225,6 +225,35 @@
         accent-color: #4da3ff;
       }
 
+      .flood-summary {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #d0d0d6;
+      }
+
+      .flood-summary strong {
+        color: #7ec9ff;
+      }
+
+      .number-control {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: #d0d0d6;
+      }
+
+      .number-control input[type="number"] {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #f7f7f8;
+        border-radius: 6px;
+        padding: 6px 8px;
+        width: 80px;
+      }
+
       .citation {
         margin-top: 14px;
         font-size: 11px;
@@ -309,6 +338,43 @@
             />
             <span id="opacity-value">70%</span>
           </div>
+          <div class="slider-control">
+            <label for="river-slider">Water height</label>
+            <input
+              type="range"
+              id="river-slider"
+              min="3"
+              max="25"
+              value="3"
+              step="0.5"
+            />
+            <span id="river-slider-value">3.0 m</span>
+          </div>
+          <label class="number-control" for="river-base-input">
+            <span>Base river level (m)</span>
+            <input
+              type="number"
+              id="river-base-input"
+              min="0"
+              max="20"
+              step="0.1"
+              value="3"
+            />
+          </label>
+          <p class="flood-summary">
+            Connected flood cells:
+            <strong id="flood-cell-count">0</strong>
+          </p>
+          <label class="number-control" for="river-seed-input">
+            <span>Min river cells</span>
+            <input
+              type="number"
+              id="river-seed-input"
+              min="1"
+              max="5000"
+              value="30"
+            />
+          </label>
           <label class="toggle-control">
             <input type="checkbox" id="multi-select-toggle" />
             <span>Enable multi-tiles selection</span>
