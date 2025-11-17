@@ -1,11 +1,8 @@
 const COG_URL =
   "https://s3.opengeohub.org/global/dtm/v1.2/gedtm_rf_m_30m_s_20060101_20151231_go_epsg.4326.3855_v1.2.tif";
 
-const THAILAND_BOUNDS = [
-  [4.5, 96.8], // southwest corner (lat, lon)
-  [21.5, 106.5], // northeast corner
-];
 const GRID_STEP_DEG = 0.02;
+const GRID_VISIBILITY_ZOOM = 10;
 const ROW_CHUNK_SIZE = 256;
 
 const statusEl = document.getElementById("status");
@@ -24,6 +21,7 @@ const riverBaseInputEl = document.getElementById("river-base-input");
 const riverSeedInputEl = document.getElementById("river-seed-input");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
+let locateButtonEl = null;
 const progressEl = document.getElementById("progress-indicator");
 const progressValueEl = document.getElementById("progress-value");
 const multiSelectToggle = document.getElementById("multi-select-toggle");
@@ -199,14 +197,36 @@ const PROVINCE_CENTROIDS = PROVINCE_DATA.map(([name, lat, lon, aliases = []]) =>
 const map = L.map("map", {
   minZoom: 4,
   zoomControl: false,
-  maxBounds: THAILAND_BOUNDS,
-  maxBoundsViscosity: 1.0,
   worldCopyJump: true,
-}).setView([13.7563, 100.5018], 12);
+}).setView([13.7563, 100.5018], 14);
 
-const baseLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: "© OpenStreetMap contributors",
-}).addTo(map);
+const openStreetMapLayer = L.tileLayer(
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {
+    attribution: "© OpenStreetMap contributors",
+  }
+);
+
+const esriWorldImageryLayer = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {
+    attribution:
+      "Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+  }
+);
+
+openStreetMapLayer.addTo(map);
+
+L.control
+  .layers(
+    {
+      Streets: openStreetMapLayer,
+      Satellite: esriWorldImageryLayer,
+    },
+    undefined,
+    { position: "topright" }
+  )
+  .addTo(map);
 
 L.control
   .scale({
@@ -214,6 +234,30 @@ L.control
     imperial: false,
   })
   .addTo(map);
+
+const locateControl = L.control({ position: "bottomright" });
+locateControl.onAdd = () => {
+  const container = L.DomUtil.create("div", "leaflet-control-locate");
+  const button = L.DomUtil.create("button", "locate-button", container);
+  button.type = "button";
+  button.title = "Go to my location";
+  button.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 3V21" stroke="#f7f7f8" stroke-width="2" stroke-linecap="round"/>
+    <path d="M21 12H3" stroke="#f7f7f8" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="12" cy="12" r="3" stroke="#f7f7f8" stroke-width="2"/>
+  </svg>`;
+  L.DomEvent.disableClickPropagation(button);
+  L.DomEvent.on(button, "click", (event) => {
+    event.preventDefault();
+    handleLocateClick();
+  });
+  locateButtonEl = button;
+  if (!navigator.geolocation) {
+    button.disabled = true;
+  }
+  return container;
+};
+locateControl.addTo(map);
 
 const gridLayer = L.layerGroup().addTo(map);
 const overlayLayer = L.layerGroup().addTo(map);
@@ -231,7 +275,7 @@ let sliderOverride = null;
 let currentOpacity = 0.7;
 const DEFAULT_BASE_RIVER_LEVEL = 3;
 const MIN_BASE_RIVER_LEVEL = 0;
-const MAX_BASE_RIVER_LEVEL = 20;
+const WATER_LEVEL_MARGIN = 12;
 const DEFAULT_MIN_RIVER_SEED_CELLS = 30;
 const MAX_RIVER_SEED_CELLS = 5000;
 const FLOOD_TINT = [79, 196, 255];
@@ -243,6 +287,9 @@ let imagePromise = null;
 let imageMetadata = null;
 let pendingRequestId = 0;
 let multiSelectEnabled = false;
+let worldCitiesData = null;
+let worldCitiesPromise = null;
+let locateInFlight = false;
 
 const setStatus = (text, { persistent = false } = {}) => {
   if (!statusEl) return;
@@ -314,11 +361,12 @@ const configureSlider = () => {
   }
 };
 
-const createOverlayEntry = (tileData) => {
+const createOverlayEntry = (tileData, floodMaskData) => {
   const { url, max, floodCellCount } = generateOverlayDataUrl(
     tileData,
     sliderOverride,
-    riverLevel
+    riverLevel,
+    floodMaskData
   );
   const layer = L.imageOverlay(url, tileData.bounds, {
     opacity: currentOpacity,
@@ -339,9 +387,12 @@ const createOverlayEntry = (tileData) => {
 };
 
 const reRenderOverlays = () => {
+  const tileDatas = overlays.map((entry) => entry.tileData);
+  const floodMaskMap = buildFloodMaskMap(tileDatas, riverLevel);
   overlays.forEach((entry, idx) => {
     overlayLayer.removeLayer(entry.layer);
-    const newEntry = createOverlayEntry(entry.tileData);
+    const maskData = floodMaskMap.get(entry.tileData);
+    const newEntry = createOverlayEntry(entry.tileData, maskData);
     overlays[idx] = newEntry;
     if (entry === currentOverlayEntry) {
       currentOverlayEntry = newEntry;
@@ -528,6 +579,91 @@ const computeConnectedFloodMask = (
   return { mask, count };
 };
 
+const computeMultiTileFloodMasks = (tileDatas, waterLevel) => {
+  if (tileDatas.length === 0) {
+    return new Map();
+  }
+  const minRow = tileDatas.reduce(
+    (acc, tile) => Math.min(acc, tile.originRow ?? 0),
+    Number.POSITIVE_INFINITY
+  );
+  const minCol = tileDatas.reduce(
+    (acc, tile) => Math.min(acc, tile.originCol ?? 0),
+    Number.POSITIVE_INFINITY
+  );
+  const maxRow = tileDatas.reduce(
+    (acc, tile) =>
+      Math.max(acc, (tile.originRow ?? 0) + (tile.height ?? 0)),
+    Number.NEGATIVE_INFINITY
+  );
+  const maxCol = tileDatas.reduce(
+    (acc, tile) =>
+      Math.max(acc, (tile.originCol ?? 0) + (tile.width ?? 0)),
+    Number.NEGATIVE_INFINITY
+  );
+  const globalWidth = Math.max(1, maxCol - minCol);
+  const globalHeight = Math.max(1, maxRow - minRow);
+  const globalValues = new Float32Array(globalWidth * globalHeight);
+  globalValues.fill(Number.NaN);
+  const offsetMap = new Map();
+  for (const tile of tileDatas) {
+    const rowOffset = (tile.originRow ?? 0) - minRow;
+    const colOffset = (tile.originCol ?? 0) - minCol;
+    offsetMap.set(tile, { rowOffset, colOffset });
+    for (let row = 0; row < tile.height; row += 1) {
+      const sourceStart = row * tile.width;
+      const targetStart =
+        (rowOffset + row) * globalWidth + colOffset;
+      for (let col = 0; col < tile.width; col += 1) {
+        globalValues[targetStart + col] =
+          tile.values[sourceStart + col];
+      }
+    }
+  }
+  const globalTile = {
+    width: globalWidth,
+    height: globalHeight,
+    values: globalValues,
+    noData: Number.NaN,
+  };
+  const globalFlood = computeConnectedFloodMask(globalTile, waterLevel);
+  const maskMap = new Map();
+  for (const tile of tileDatas) {
+    const offsets = offsetMap.get(tile);
+    if (!offsets) continue;
+    const { rowOffset, colOffset } = offsets;
+    const tileMask = new Uint8Array(tile.width * tile.height);
+    let count = 0;
+    for (let row = 0; row < tile.height; row += 1) {
+      const globalRow = rowOffset + row;
+      const globalStart = globalRow * globalWidth + colOffset;
+      for (let col = 0; col < tile.width; col += 1) {
+        const maskValue =
+          globalFlood.mask[globalStart + col] ?? 0;
+        tileMask[row * tile.width + col] = maskValue;
+        if (maskValue === 1) {
+          count += 1;
+        }
+      }
+    }
+    maskMap.set(tile, { mask: tileMask, count });
+  }
+  return maskMap;
+};
+
+const buildFloodMaskMap = (tileDatas, waterLevel) => {
+  const maskMap = new Map();
+  if (tileDatas.length === 0) return maskMap;
+  const shouldCombine = multiSelectEnabled && tileDatas.length > 1;
+  if (shouldCombine) {
+    return computeMultiTileFloodMasks(tileDatas, waterLevel);
+  }
+  tileDatas.forEach((tile) => {
+    maskMap.set(tile, computeConnectedFloodMask(tile, waterLevel));
+  });
+  return maskMap;
+};
+
 const updateLegend = (min, max, note) => {
   if (legendNoteEl) legendNoteEl.textContent = note;
   if (legendMinEl) legendMinEl.textContent = formatElevation(min);
@@ -549,7 +685,7 @@ const updateFloodSummary = () => {
 const syncLegendToggleState = () => {
   if (!legendToggleEl || !legendEl) return;
   const collapsed = legendEl.classList.contains("collapsed");
-  legendToggleEl.textContent = "X";
+  legendToggleEl.textContent = collapsed ? "▲" : "X";
   legendToggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
   legendToggleEl.setAttribute(
     "aria-label",
@@ -594,21 +730,28 @@ const normalizeBaseRiverLevel = (value) => {
   if (!Number.isFinite(parsed)) {
     return DEFAULT_BASE_RIVER_LEVEL;
   }
-  return clamp(parsed, MIN_BASE_RIVER_LEVEL, MAX_BASE_RIVER_LEVEL);
+  return Math.max(MIN_BASE_RIVER_LEVEL, parsed);
 };
+
+const syncRiverSliderBounds = () => {
+  if (!riverSliderEl) return;
+  const maxWaterLevel = baseRiverLevel + WATER_LEVEL_MARGIN;
+  riverSliderEl.min = String(baseRiverLevel);
+  riverSliderEl.max = String(maxWaterLevel);
+  riverSliderEl.step = "0.2";
+  riverLevel = clamp(riverLevel, baseRiverLevel, maxWaterLevel);
+  riverSliderEl.value = riverLevel;
+};
+
 const applyBaseRiverLevel = (value, { silent = false } = {}) => {
   const normalized = normalizeBaseRiverLevel(value);
   baseRiverLevel = normalized;
+  riverLevel = baseRiverLevel;
   if (riverBaseInputEl) {
     riverBaseInputEl.value = normalized.toFixed(1);
   }
-  if (riverLevel < baseRiverLevel) {
-    riverLevel = baseRiverLevel;
-    if (riverSliderEl) {
-      riverSliderEl.value = riverLevel;
-    }
-    updateRiverSliderDisplay();
-  }
+  syncRiverSliderBounds();
+  updateRiverSliderDisplay();
   if (overlays.length > 0) {
     reRenderOverlays();
   } else {
@@ -651,8 +794,8 @@ const handleRiverSeedInput = () => {
   applyMinRiverSeedCells(riverSeedInputEl.value);
 };
 const clampLatLon = ([lat, lon]) => {
-  const latClamped = clamp(lat, THAILAND_BOUNDS[0][0], THAILAND_BOUNDS[1][0]);
-  const lonClamped = clamp(lon, THAILAND_BOUNDS[0][1], THAILAND_BOUNDS[1][1]);
+  const latClamped = clamp(lat, -90, 90);
+  const lonClamped = clamp(lon, -180, 180);
   return [latClamped, lonClamped];
 };
 
@@ -707,7 +850,8 @@ const sliderNote = (value) =>
 const generateOverlayDataUrl = (
   tileData,
   maxValue,
-  waterLevel = baseRiverLevel
+  waterLevel = baseRiverLevel,
+  floodMaskData
 ) => {
   const { values, width, height, min, max, noData } = tileData;
   const effectiveMax = clamp(
@@ -721,10 +865,8 @@ const generateOverlayDataUrl = (
   const ctx = canvas.getContext("2d");
   const imageData = ctx.createImageData(width, height);
   const out = imageData.data;
-  const { mask, count: floodCellCount } = computeConnectedFloodMask(
-    tileData,
-    waterLevel
-  );
+  const { mask, count: floodCellCount } =
+    floodMaskData ?? computeConnectedFloodMask(tileData, waterLevel);
 
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i];
@@ -757,8 +899,12 @@ const applyOverlayFromTile = (tileData) => {
   const entry = createOverlayEntry(tileData);
   overlays.push(entry);
   currentOverlayEntry = entry;
-  configureSlider();
-  updateLegendFromOverlays();
+  if (multiSelectEnabled) {
+    reRenderOverlays();
+  } else {
+    configureSlider();
+    updateLegendFromOverlays();
+  }
 };
 
 const handleSliderInput = () => {
@@ -804,8 +950,9 @@ const updateRiverSliderDisplay = () => {
 const handleRiverSliderInput = () => {
   if (!riverSliderEl) return;
   const nextValue = Number(riverSliderEl.value);
+  const maxWaterLevel = baseRiverLevel + WATER_LEVEL_MARGIN;
   riverLevel = Number.isFinite(nextValue)
-    ? Math.max(baseRiverLevel, nextValue)
+    ? clamp(nextValue, baseRiverLevel, maxWaterLevel)
     : baseRiverLevel;
   riverSliderEl.value = riverLevel;
   updateRiverSliderDisplay();
@@ -834,9 +981,9 @@ if (riverBaseInputEl) {
 if (riverSliderEl) {
   const initialValue = Number(riverSliderEl.value);
   riverLevel = Number.isFinite(initialValue)
-    ? Math.max(baseRiverLevel, initialValue)
+    ? initialValue
     : baseRiverLevel;
-  riverSliderEl.value = riverLevel;
+  syncRiverSliderBounds();
   updateRiverSliderDisplay();
   riverSliderEl.addEventListener("input", handleRiverSliderInput);
 } else {
@@ -890,8 +1037,6 @@ const lonToCol = (lon, meta) =>
 const latToRow = (lat, meta) =>
   clamp(Math.floor((meta.maxY - lat) / meta.pixelHeight), 0, meta.height);
 
-const clampToBounds = (value, [min, max]) => clamp(value, min, max);
-
 const updateSelectionHighlight = () => {
   selectionLayer.clearLayers();
   if (!selectionBounds) return;
@@ -907,13 +1052,15 @@ const alignToGrid = (value) =>
 
 function updateGrid() {
   gridLayer.clearLayers();
+  if (map.getZoom() < GRID_VISIBILITY_ZOOM) {
+    setStatus("Zoom in and click on a tile to see DEM data.", { persistent: true });
+    return;
+  }
   const bounds = map.getBounds();
-  const [south, west] = THAILAND_BOUNDS[0];
-  const [north, east] = THAILAND_BOUNDS[1];
-  const viewSouth = clampToBounds(bounds.getSouth(), [south, north]);
-  const viewNorth = clampToBounds(bounds.getNorth(), [south, north]);
-  const viewWest = clampToBounds(bounds.getWest(), [west, east]);
-  const viewEast = clampToBounds(bounds.getEast(), [west, east]);
+  const viewSouth = bounds.getSouth();
+  const viewNorth = bounds.getNorth();
+  const viewWest = bounds.getWest();
+  const viewEast = bounds.getEast();
 
   const latStart = alignToGrid(viewSouth - GRID_STEP_DEG);
   const latEnd = alignToGrid(viewNorth + GRID_STEP_DEG);
@@ -921,14 +1068,14 @@ function updateGrid() {
   const lonEnd = alignToGrid(viewEast + GRID_STEP_DEG);
 
   for (let lat = latStart; lat < latEnd; lat += GRID_STEP_DEG) {
-    const clampedLat = clamp(lat, south, north);
-    const nextLat = clamp(lat + GRID_STEP_DEG, south, north);
     for (let lon = lonStart; lon < lonEnd; lon += GRID_STEP_DEG) {
-      const clampedLon = clamp(lon, west, east);
-      const nextLon = clamp(lon + GRID_STEP_DEG, west, east);
+      const latSouth = Math.min(lat, lat + GRID_STEP_DEG);
+      const latNorth = Math.max(lat, lat + GRID_STEP_DEG);
+      const lonWest = Math.min(lon, lon + GRID_STEP_DEG);
+      const lonEast = Math.max(lon, lon + GRID_STEP_DEG);
       const cellBounds = [
-        [clampedLat, clampedLon],
-        [nextLat, nextLon],
+        [latSouth, lonWest],
+        [latNorth, lonEast],
       ];
       const rect = L.rectangle(cellBounds, {
         color: "#000",
@@ -1047,6 +1194,8 @@ async function renderCell(bounds) {
       max,
       bounds,
       noData,
+      originRow: rowStart,
+      originCol: colStart,
     };
     if (!multiSelectEnabled) {
       sliderOverride = null;
@@ -1110,6 +1259,138 @@ const tryParseLatLon = (query) => {
   return [lat, lon];
 };
 
+function flyToLocation(lat, lon, label = null, targetZoom = 11) {
+  const [clampedLat, clampedLon] = clampLatLon([lat, lon]);
+  map.flyTo([clampedLat, clampedLon], Math.max(map.getZoom(), targetZoom), {
+    duration: 1.2,
+  });
+  setStatus(
+    label
+      ? `Centered on ${label}`
+      : `Centered on ${clampedLat.toFixed(3)}, ${clampedLon.toFixed(3)}`
+  );
+};
+
+function handleLocateClick() {
+  if (!navigator.geolocation || locateInFlight) return;
+  locateInFlight = true;
+  if (locateButtonEl) locateButtonEl.disabled = true;
+  const finishLocate = () => {
+    locateInFlight = false;
+    if (locateButtonEl) locateButtonEl.disabled = false;
+  };
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      flyToLocation(latitude, longitude, "your location", 14);
+      finishLocate();
+    },
+    (error) => {
+      console.error("Geolocation failed:", error);
+      setStatus("Unable to fetch your location.", { persistent: false });
+      finishLocate();
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    }
+  );
+}
+
+const parseCsvLine = (line) => {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+};
+
+const parseWorldCitiesCsv = (text) => {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return [];
+  const header = parseCsvLine(lines.shift());
+  const getIndex = (key) => header.findIndex((col) => col === key);
+  const idxCity = getIndex("city");
+  const idxAscii = getIndex("city_ascii");
+  const idxLat = getIndex("lat");
+  const idxLon = getIndex("lng");
+  const idxCountry = getIndex("country");
+  const idxAdmin = getIndex("admin_name");
+  return lines
+    .map((line) => parseCsvLine(line))
+    .map((values) => ({
+      city: values[idxCity] ?? "",
+      ascii: values[idxAscii] ?? "",
+      lat: Number(values[idxLat]),
+      lon: Number(values[idxLon]),
+      country: values[idxCountry] ?? "",
+      admin: values[idxAdmin] ?? "",
+    }))
+    .filter(
+      (entry) =>
+        Number.isFinite(entry.lat) &&
+        Number.isFinite(entry.lon) &&
+        (entry.city || entry.ascii)
+    )
+    .map((entry) => {
+      const labelParts = [entry.city || entry.ascii, entry.admin, entry.country]
+        .filter(Boolean)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const tokens = [entry.city, entry.ascii, entry.admin, entry.country]
+        .filter(Boolean)
+        .map((value) => normalizeText(value))
+        .filter(Boolean);
+      return {
+        name: entry.city || entry.ascii,
+        lat: entry.lat,
+        lon: entry.lon,
+        label: labelParts.join(", "),
+        tokens,
+      };
+    });
+};
+
+const loadWorldCitiesData = async () => {
+  if (worldCitiesData) return worldCitiesData;
+  if (!worldCitiesPromise) {
+    worldCitiesPromise = fetch("./worldcities.csv")
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load worldcities.csv (${response.status})`);
+        }
+        return response.text();
+      })
+      .then((text) => {
+        worldCitiesData = parseWorldCitiesCsv(text);
+        return worldCitiesData;
+      })
+      .catch((error) => {
+        console.error("World cities lookup failed:", error);
+        worldCitiesPromise = null;
+        return null;
+      });
+  }
+  return worldCitiesPromise;
+};
+
 const findProvinceLocation = (query) => {
   const norm = normalizeText(query);
   if (!norm) return null;
@@ -1125,7 +1406,24 @@ const findProvinceLocation = (query) => {
   return null;
 };
 
-const handleSearch = (query) => {
+const findWorldCityLocation = async (query) => {
+  const norm = normalizeText(query);
+  if (!norm) return null;
+  const cities = await loadWorldCitiesData();
+  if (!cities) return null;
+  for (const city of cities) {
+    if (
+      city.tokens.some(
+        (token) => norm.includes(token) || token.includes(norm)
+      )
+    ) {
+      return city;
+    }
+  }
+  return null;
+};
+
+const handleSearch = async (query) => {
   if (!query) return;
   let coords = null;
   let label = null;
@@ -1138,10 +1436,16 @@ const handleSearch = (query) => {
     if (match) {
       coords = [match.lat, match.lon];
       label = match.name;
+    } else {
+      const cityMatch = await findWorldCityLocation(query);
+      if (cityMatch) {
+        coords = [cityMatch.lat, cityMatch.lon];
+        label = cityMatch.label || cityMatch.name;
+      }
     }
   }
   if (!coords) {
-    setStatus("Location not found. Try 'lat,lon' or known Thai cities.", {
+    setStatus("Location not found. Try 'lat,lon' or a known city.", {
       persistent: false,
     });
     return;
@@ -1158,9 +1462,9 @@ const handleSearch = (query) => {
 };
 
 if (searchForm && searchInput) {
-  searchForm.addEventListener("submit", (event) => {
+  searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    handleSearch(searchInput.value);
+    await handleSearch(searchInput.value);
   });
 }
 
@@ -1187,4 +1491,9 @@ updateLegend(-50, 4000, "Click a grid cell to stream DEM data.");
 updateGrid();
 map.on("moveend", updateGrid);
 map.on("zoomend", updateGrid);
-setStatus("Click a grid cell to stream DEM data.", { persistent: true });
+setStatus(
+  map.getZoom() < GRID_VISIBILITY_ZOOM
+    ? "Zoom in and click on a tile to see DEM data."
+    : "Click a grid cell to stream DEM data.",
+  { persistent: true }
+);
