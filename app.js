@@ -196,6 +196,7 @@ const PROVINCE_CENTROIDS = PROVINCE_DATA.map(([name, lat, lon, aliases = []]) =>
 
 const map = L.map("map", {
   minZoom: 4,
+  maxZoom: 20,
   zoomControl: false,
   worldCopyJump: true,
 }).setView([13.7563, 100.5018], 14);
@@ -204,6 +205,7 @@ const openStreetMapLayer = L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
     attribution: "© OpenStreetMap contributors",
+    maxZoom: 20,
   }
 );
 
@@ -212,6 +214,7 @@ const esriWorldImageryLayer = L.tileLayer(
   {
     attribution:
       "Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+    maxZoom: 20,
   }
 );
 
@@ -361,7 +364,20 @@ const configureSlider = () => {
   }
 };
 
-const createOverlayEntry = (tileData, floodMaskData) => {
+const boundsKey = (bounds) => {
+  const [[south, west], [north, east]] = bounds;
+  return [
+    south.toFixed(5),
+    west.toFixed(5),
+    north.toFixed(5),
+    east.toFixed(5),
+  ].join(",");
+};
+
+const findOverlayByKey = (key) =>
+  overlays.find((entry) => entry.key === key) ?? null;
+
+const createOverlayEntry = (tileData, floodMaskData, key = boundsKey(tileData.bounds)) => {
   const { url, max, floodCellCount } = generateOverlayDataUrl(
     tileData,
     sliderOverride,
@@ -376,10 +392,12 @@ const createOverlayEntry = (tileData, floodMaskData) => {
   const imageEl = layer.getElement();
   if (imageEl) {
     imageEl.style.imageRendering = "pixelated";
+    imageEl.style.pointerEvents = "none";
   }
   return {
     layer,
     tileData,
+    key,
     effectiveMax: max,
     isOverride: sliderOverride !== null,
     floodCellCount,
@@ -392,7 +410,7 @@ const reRenderOverlays = () => {
   overlays.forEach((entry, idx) => {
     overlayLayer.removeLayer(entry.layer);
     const maskData = floodMaskMap.get(entry.tileData);
-    const newEntry = createOverlayEntry(entry.tileData, maskData);
+    const newEntry = createOverlayEntry(entry.tileData, maskData, entry.key);
     overlays[idx] = newEntry;
     if (entry === currentOverlayEntry) {
       currentOverlayEntry = newEntry;
@@ -891,14 +909,27 @@ const generateOverlayDataUrl = (
   };
 };
 
-const applyOverlayFromTile = (tileData) => {
+const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) => {
   if (!tileData) return;
+  const existing = findOverlayByKey(cacheKey);
+  if (existing && multiSelectEnabled) {
+    currentOverlayEntry = existing;
+    currentTileData = existing.tileData;
+    configureSlider();
+    updateLegendFromOverlays();
+    selectionBounds = null;
+    updateSelectionHighlight();
+    return;
+  }
   if (!multiSelectEnabled) {
     clearOverlays();
   }
-  const entry = createOverlayEntry(tileData);
+  const entry = createOverlayEntry(tileData, undefined, cacheKey);
   overlays.push(entry);
   currentOverlayEntry = entry;
+  currentTileData = tileData;
+  selectionBounds = null;
+  updateSelectionHighlight();
   if (multiSelectEnabled) {
     reRenderOverlays();
   } else {
@@ -1039,7 +1070,7 @@ const latToRow = (lat, meta) =>
 
 const updateSelectionHighlight = () => {
   selectionLayer.clearLayers();
-  if (!selectionBounds) return;
+  if (!selectionBounds || multiSelectEnabled) return;
   L.rectangle(selectionBounds, {
     color: "#4da3ff",
     weight: 2,
@@ -1082,8 +1113,7 @@ function updateGrid() {
         weight: 1,
         fillOpacity: 0,
       }).addTo(gridLayer);
-      rect.on("click", (event) => {
-        L.DomEvent.stopPropagation(event);
+      rect.on("click", () => {
         handleCellSelection(cellBounds);
       });
     }
@@ -1099,6 +1129,17 @@ async function handleCellSelection(bounds) {
 }
 
 async function renderCell(bounds) {
+  const cacheKey = boundsKey(bounds);
+  const existingOverlay = findOverlayByKey(cacheKey);
+  if (existingOverlay) {
+    currentOverlayEntry = existingOverlay;
+    currentTileData = existingOverlay.tileData;
+    selectionBounds = null;
+    updateSelectionHighlight();
+    configureSlider();
+    updateLegendFromOverlays();
+    return;
+  }
   const requestId = ++pendingRequestId;
   setStatus("Fetching DEM for selected cell…", { persistent: true });
   startDownloadTracker();
@@ -1200,7 +1241,7 @@ async function renderCell(bounds) {
     if (!multiSelectEnabled) {
       sliderOverride = null;
     }
-    applyOverlayFromTile(currentTileData);
+    applyOverlayFromTile(currentTileData, cacheKey);
     setStatus("DEM tile ready.");
     hideProgress();
     stopDownloadTracker();
@@ -1213,18 +1254,34 @@ async function renderCell(bounds) {
 }
 
 const sampleValueAtLatLng = (latlng) => {
-  if (!currentTileData) return null;
-  const [[south, west], [north, east]] = currentTileData.bounds;
-  const { width, height, values, noData } = currentTileData;
-  const { lat, lng } = latlng;
-  if (lat < south || lat > north || lng < west || lng > east) return null;
-  const latRatio = (north - lat) / Math.max(1e-6, north - south);
-  const lonRatio = (lng - west) / Math.max(1e-6, east - west);
-  const row = clamp(Math.floor(latRatio * height), 0, height - 1);
-  const col = clamp(Math.floor(lonRatio * width), 0, width - 1);
-  const value = values[row * width + col];
-  if (!Number.isFinite(value) || value === noData) return null;
-  return value;
+  const candidateTiles = [];
+  if (currentOverlayEntry?.tileData) {
+    candidateTiles.push(currentOverlayEntry.tileData);
+  }
+  for (let i = overlays.length - 1; i >= 0; i -= 1) {
+    const tile = overlays[i]?.tileData;
+    if (tile && !candidateTiles.includes(tile)) {
+      candidateTiles.push(tile);
+    }
+  }
+  if (currentTileData && !candidateTiles.includes(currentTileData)) {
+    candidateTiles.push(currentTileData);
+  }
+  for (const tileData of candidateTiles) {
+    const [[south, west], [north, east]] = tileData.bounds;
+    const { width, height, values, noData } = tileData;
+    const { lat, lng } = latlng;
+    if (lat < south || lat > north || lng < west || lng > east) continue;
+    const latRatio = (north - lat) / Math.max(1e-6, north - south);
+    const lonRatio = (lng - west) / Math.max(1e-6, east - west);
+    const row = clamp(Math.floor(latRatio * height), 0, height - 1);
+    const col = clamp(Math.floor(lonRatio * width), 0, width - 1);
+    const value = values[row * width + col];
+    if (!Number.isFinite(value) || value === noData) continue;
+    currentTileData = tileData;
+    return value;
+  }
+  return null;
 };
 
 map.on("click", (event) => {
@@ -1234,7 +1291,9 @@ map.on("click", (event) => {
   if (value == null) {
     popup.remove();
     if (currentTileData) {
-      setStatus("Click inside highlighted cell to sample.", { persistent: false });
+      setStatus("Click inside a loaded DEM tile to sample.", {
+        persistent: false,
+      });
     }
     return;
   }
@@ -1474,13 +1533,13 @@ if (multiSelectToggle) {
     if (!multiSelectEnabled) {
       clearOverlays();
       selectionBounds = null;
-      updateSelectionHighlight();
     }
     setStatus(
       multiSelectEnabled
         ? "Multi-select enabled. Click multiple cells to compare."
         : "Multi-select disabled. Previous overlays cleared."
     );
+    updateSelectionHighlight();
     configureSlider();
     updateLegendFromOverlays();
   });
