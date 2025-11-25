@@ -35,7 +35,7 @@
 
       .status {
         position: absolute;
-        top: 16px;
+        top: 64px;
         left: 50%;
         transform: translateX(-50%);
         background: rgba(10, 10, 16, 0.9);
@@ -55,7 +55,7 @@
 
       .progress-indicator {
         position: absolute;
-        top: 60px;
+        top: 104px;
         left: 50%;
         transform: translateX(-50%);
         background: rgba(10, 10, 16, 0.9);
@@ -95,7 +95,7 @@
         color: #f2f2f5;
         padding: 6px 10px;
         border-radius: 6px;
-        width: 200px;
+        width: 160px;
         font-size: 13px;
       }
 
@@ -139,6 +139,9 @@
         font-size: 15px;
         font-weight: 600;
         letter-spacing: 0.04em;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
 
       .legend-toggle {
@@ -157,6 +160,31 @@
       .legend-toggle:focus-visible {
         background: rgba(255, 255, 255, 0.15);
         color: #fff;
+      }
+
+      .share-button {
+        border: none;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f7f7f8;
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.2s ease, color 0.2s ease;
+      }
+
+      .share-button:hover,
+      .share-button:focus-visible {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+      }
+
+      .share-button svg {
+        width: 14px;
+        height: 14px;
       }
 
       .legend-content {
@@ -346,6 +374,73 @@
         color: #f2f2f5;
         font-size: 13px;
       }
+
+      .flood-legend {
+        position: absolute;
+        top: 66px;
+        right: 12px;
+        background: rgba(10, 10, 16, 0.94);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 6px 8px;
+        width: fit-content;
+        min-width: 0;
+        z-index: 550;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      }
+
+      .flood-legend.hidden {
+        display: none;
+      }
+
+      .flood-legend-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        margin-bottom: 6px;
+        font-size: 13px;
+        color: #f7f7f8;
+      }
+
+      .flood-legend-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: #cdd3df;
+      }
+
+      .flood-legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7ec9ff;
+        box-shadow: 0 0 8px rgba(126, 201, 255, 0.45);
+      }
+
+      .flood-legend-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .flood-legend-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: #e1e4eb;
+      }
+
+      .flood-legend-swatch {
+        width: 26px;
+        height: 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: #4da3ff;
+        flex-shrink: 0;
+      }
     </style>
   </head>
   <body>
@@ -368,7 +463,18 @@
       </div>
       <aside class="legend">
         <div class="legend-header">
-          <h2>Digital Terrain Model</h2>
+          <h2>
+            Digital Terrain Model
+            <button type="button" id="share-button" class="share-button" aria-label="Copy shareable link">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+            </button>
+          </h2>
           <button
             type="button"
             id="legend-toggle"
@@ -464,6 +570,55 @@
           </p>
         </div>
       </aside>
+      <div id="flood-legend" class="flood-legend hidden" aria-live="polite">
+        <div class="flood-legend-header">
+          <span>Flood depth (m)</span>
+        </div>
+        <div class="flood-legend-rows">
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(148, 197, 233)"
+            ></span>
+            <span>0.5–1</span>
+          </div>
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(99, 157, 223)"
+            ></span>
+            <span>1–2</span>
+          </div>
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(55, 127, 228)"
+            ></span>
+            <span>2–3</span>
+          </div>
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(46, 70, 198)"
+            ></span>
+            <span>3–4</span>
+          </div>
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(7, 38, 59)"
+            ></span>
+            <span>4–5</span>
+          </div>
+          <div class="flood-legend-row">
+            <span
+              class="flood-legend-swatch"
+              style="background: rgb(110, 0, 0)"
+            ></span>
+            <span>> 5</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script src="./vendor/leaflet.js"></script>

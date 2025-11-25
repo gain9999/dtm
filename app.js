@@ -17,16 +17,46 @@ const opacityValueEl = document.getElementById("opacity-value");
 const riverSliderEl = document.getElementById("river-slider");
 const riverSliderValueEl = document.getElementById("river-slider-value");
 const floodCellCountEl = document.getElementById("flood-cell-count");
+const floodLegendEl = document.getElementById("flood-legend");
 const riverBaseInputEl = document.getElementById("river-base-input");
 const riverSeedInputEl = document.getElementById("river-seed-input");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
+const shareButtonEl = document.getElementById("share-button");
 let locateButtonEl = null;
 const progressEl = document.getElementById("progress-indicator");
 const progressValueEl = document.getElementById("progress-value");
 const multiSelectToggle = document.getElementById("multi-select-toggle");
 const legendEl = document.querySelector(".legend");
 const legendToggleEl = document.getElementById("legend-toggle");
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const parseNumberParam = (params, key) => {
+  const raw = params.get(key);
+  const parsed = raw == null ? null : Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseBooleanParam = (params, key, defaultValue = false) => {
+  const raw = params.get(key);
+  if (raw == null) return defaultValue;
+  return raw === "1" || raw.toLowerCase() === "true";
+};
+
+const INITIAL_VIEW = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const lat = parseNumberParam(params, "lat");
+  const lon = parseNumberParam(params, "lon");
+  const zoom = parseNumberParam(params, "z");
+  const defaultCenter = [13.7563, 100.5018];
+  const center = [
+    clamp(lat ?? defaultCenter[0], -90, 90),
+    clamp(lon ?? defaultCenter[1], -180, 180),
+  ];
+  const zoomLevel = Number.isFinite(zoom) ? clamp(zoom, 1, 20) : 14;
+  return { center, zoom: zoomLevel };
+})();
 
 const originalFetch = window.fetch.bind(window);
 let activeDownloadTracker = null;
@@ -199,7 +229,7 @@ const map = L.map("map", {
   maxZoom: 20,
   zoomControl: false,
   worldCopyJump: true,
-}).setView([13.7563, 100.5018], 14);
+}).setView(INITIAL_VIEW.center, INITIAL_VIEW.zoom);
 
 const openStreetMapLayer = L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -281,8 +311,14 @@ const MIN_BASE_RIVER_LEVEL = 0;
 const WATER_LEVEL_MARGIN = 12;
 const DEFAULT_MIN_RIVER_SEED_CELLS = 30;
 const MAX_RIVER_SEED_CELLS = 5000;
-const FLOOD_TINT = [79, 196, 255];
-const FLOOD_TINT_WEIGHT = 0.65;
+const FLOOD_DEPTH_COLORS = [
+  { min: 0.5, max: 1, color: [148, 197, 233] },
+  { min: 1, max: 2, color: [99, 157, 223] },
+  { min: 2, max: 3, color: [55, 127, 228] },
+  { min: 3, max: 4, color: [46, 70, 198] },
+  { min: 4, max: 5, color: [7, 38, 59] },
+  { min: 5, max: Number.POSITIVE_INFINITY, color: [110, 0, 0] },
+];
 let baseRiverLevel = DEFAULT_BASE_RIVER_LEVEL;
 let riverLevel = DEFAULT_BASE_RIVER_LEVEL;
 let minRiverSeedCells = DEFAULT_MIN_RIVER_SEED_CELLS;
@@ -293,6 +329,9 @@ let multiSelectEnabled = false;
 let worldCitiesData = null;
 let worldCitiesPromise = null;
 let locateInFlight = false;
+let isInitializing = true;
+const pendingTilesFromUrl = [];
+let shareUrlCache = window.location.pathname;
 
 const setStatus = (text, { persistent = false } = {}) => {
   if (!statusEl) return;
@@ -418,11 +457,12 @@ const reRenderOverlays = () => {
   });
   configureSlider();
   updateLegendFromOverlays();
+  syncUrlFromState();
 };
 
 const updateLegendFromOverlays = () => {
   if (overlays.length === 0) {
-    updateLegend(-50, 4000, "Click a grid cell to stream DEM data.");
+    updateLegend(-50, 4000, "");
     updateFloodSummary();
     return;
   }
@@ -437,20 +477,7 @@ const updateLegendFromOverlays = () => {
           (acc, entry) => Math.max(acc, entry.effectiveMax),
           Number.NEGATIVE_INFINITY
         );
-  let note = DEFAULT_CELL_NOTE;
-  if (sliderOverride !== null) {
-    note = !multiSelectEnabled || overlays.length === 1
-      ? sliderNote(sliderOverride)
-      : `Combined stats (max slider: ${formatElevation(sliderOverride)})`;
-  } else if (!multiSelectEnabled || overlays.length === 1) {
-    const entry = currentOverlayEntry ?? overlays[overlays.length - 1];
-    note = entry?.isOverride
-      ? sliderNote(entry.effectiveMax)
-      : DEFAULT_CELL_NOTE;
-  } else {
-    note = "Combined stats for selected cells.";
-  }
-  updateLegend(aggregatedMin, aggregatedMax, note);
+  updateLegend(aggregatedMin, aggregatedMax, "");
   updateFloodSummary();
 };
 
@@ -461,6 +488,7 @@ const clearOverlays = () => {
   sliderOverride = null;
   configureSlider();
   updateLegendFromOverlays();
+  syncUrlFromState();
 };
 
 const formatElevation = (value) =>
@@ -488,16 +516,6 @@ const buildGradient = (min, max) => {
     stops.push(`${rgbToCss(color)} ${t * 100}%`);
   }
   return `linear-gradient(90deg, ${stops.join(", ")})`;
-};
-
-const blendColors = (base, tint, tintWeight = FLOOD_TINT_WEIGHT) => {
-  const clampedWeight = Math.max(0, Math.min(1, tintWeight));
-  const baseWeight = 1 - clampedWeight;
-  return [
-    Math.round(base[0] * baseWeight + tint[0] * clampedWeight),
-    Math.round(base[1] * baseWeight + tint[1] * clampedWeight),
-    Math.round(base[2] * baseWeight + tint[2] * clampedWeight),
-  ];
 };
 
 const computeConnectedFloodMask = (
@@ -692,12 +710,16 @@ const updateLegend = (min, max, note) => {
 };
 
 const updateFloodSummary = () => {
-  if (!floodCellCountEl) return;
   const totalFloodCells = overlays.reduce(
     (sum, entry) => sum + (entry.floodCellCount ?? 0),
     0
   );
-  floodCellCountEl.textContent = totalFloodCells.toLocaleString();
+  if (floodCellCountEl) {
+    floodCellCountEl.textContent = totalFloodCells.toLocaleString();
+  }
+  if (floodLegendEl) {
+    floodLegendEl.classList.toggle("hidden", totalFloodCells === 0);
+  }
 };
 
 const syncLegendToggleState = () => {
@@ -742,7 +764,157 @@ const disableSlider = () => {
   }
 };
 
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const getCurrentMaxSliderValue = () => {
+  if (sliderOverride !== null) return sliderOverride;
+  if (maxSliderEl && !maxSliderEl.disabled) {
+    const parsed = Number(maxSliderEl.value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const syncUrlFromState = () => {
+  if (!map) return;
+  const params = new URLSearchParams();
+  const center = map.getCenter();
+  params.set("lat", center.lat.toFixed(5));
+  params.set("lon", center.lng.toFixed(5));
+  params.set("z", map.getZoom().toFixed(2));
+  params.set("water", riverLevel.toFixed(1));
+  params.set("base", baseRiverLevel.toFixed(1));
+  params.set("seed", String(minRiverSeedCells));
+  params.set("opacity", String(Math.round(currentOpacity * 100)));
+  params.set("multi", multiSelectEnabled ? "1" : "0");
+  const maxValue = getCurrentMaxSliderValue();
+  if (Number.isFinite(maxValue)) {
+    params.set("max", String(maxValue));
+  }
+  if (overlays.length > 0) {
+    const tilesParam = overlays
+      .map((entry) => entry.key)
+      .filter(Boolean)
+      .join("|");
+    if (tilesParam) {
+      params.set("tiles", tilesParam);
+    }
+  }
+  const query = params.toString();
+  shareUrlCache =
+    query.length > 0
+      ? `${window.location.pathname}?${query}${window.location.hash}`
+      : `${window.location.pathname}${window.location.hash}`;
+};
+
+const applySettingsFromQuery = () => {
+  const params = new URLSearchParams(window.location.search);
+  const lat = parseNumberParam(params, "lat");
+  const lon = parseNumberParam(params, "lon");
+  const zoom = parseNumberParam(params, "z");
+  if (lat !== null && lon !== null) {
+    const [targetLat, targetLon] = clampLatLon([lat, lon]);
+    map.setView([targetLat, targetLon], Number.isFinite(zoom) ? zoom : map.getZoom());
+  } else if (zoom !== null) {
+    map.setZoom(zoom);
+  }
+
+  const baseParam = parseNumberParam(params, "base");
+  if (baseParam !== null) {
+    applyBaseRiverLevel(baseParam, { silent: true });
+  }
+  const seedParam = parseNumberParam(params, "seed");
+  if (seedParam !== null) {
+    applyMinRiverSeedCells(seedParam, { silent: true });
+  }
+  const waterParam = parseNumberParam(params, "water");
+  if (waterParam !== null) {
+    const maxWaterLevel = baseRiverLevel + WATER_LEVEL_MARGIN;
+    riverLevel = clamp(waterParam, baseRiverLevel, maxWaterLevel);
+    if (riverSliderEl) {
+      riverSliderEl.value = riverLevel;
+    }
+    updateRiverSliderDisplay();
+    if (overlays.length > 0) {
+      reRenderOverlays();
+    } else {
+      updateFloodSummary();
+    }
+  }
+
+  const opacityParam = parseNumberParam(params, "opacity");
+  if (opacityParam !== null) {
+    const clampedOpacity = clamp(opacityParam, 10, 100);
+    currentOpacity = clampedOpacity / 100;
+    if (opacitySliderEl) {
+      opacitySliderEl.value = clampedOpacity;
+    }
+    handleOpacityInput();
+  }
+
+  const multiParam = parseBooleanParam(params, "multi", multiSelectEnabled);
+  multiSelectEnabled = multiParam;
+  if (multiSelectToggle) {
+    multiSelectToggle.checked = multiParam;
+  }
+
+  const maxParam = parseNumberParam(params, "max");
+  if (maxParam !== null) {
+    sliderOverride = maxParam;
+    if (maxSliderEl) {
+      maxSliderEl.value = maxParam;
+    }
+    if (sliderValueEl) {
+      sliderValueEl.textContent = formatElevation(maxParam);
+    }
+  }
+
+  const tilesParam = params.get("tiles");
+  if (tilesParam && tilesParam.includes(",")) {
+    const tiles = tilesParam
+      .split("|")
+      .map((token) => token.trim())
+      .filter(Boolean);
+    pendingTilesFromUrl.push(...tiles);
+  }
+};
+
+const applyTilesFromUrl = async () => {
+  if (pendingTilesFromUrl.length === 0) return;
+  if (!multiSelectEnabled && pendingTilesFromUrl.length > 1) {
+    multiSelectEnabled = true;
+    if (multiSelectToggle) {
+      multiSelectToggle.checked = true;
+    }
+  }
+  // Process sequentially to avoid race conditions clobbering slider/selection state.
+  for (const key of pendingTilesFromUrl) {
+    const parts = key.split(",").map((v) => Number(v));
+    if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) continue;
+    const bounds = [
+      [parts[0], parts[1]],
+      [parts[2], parts[3]],
+    ];
+    // Trigger the same path as clicking a grid cell.
+    // eslint-disable-next-line no-await-in-loop
+    await renderCell(bounds);
+  }
+  pendingTilesFromUrl.length = 0;
+};
+
+const copyShareUrl = async () => {
+  syncUrlFromState();
+  const textToCopy = `${window.location.origin}${shareUrlCache}`;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(textToCopy);
+      setStatus("Share link copied.");
+      return;
+    }
+  } catch (error) {
+    console.warn("Clipboard write failed, falling back to prompt.", error);
+  }
+  window.prompt("Copy this link", textToCopy); // eslint-disable-line no-alert
+};
+
 const normalizeBaseRiverLevel = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
@@ -778,6 +950,7 @@ const applyBaseRiverLevel = (value, { silent = false } = {}) => {
   if (!silent) {
     setStatus(`Base river level set to ${formatWaterLevel(baseRiverLevel)}`);
   }
+  syncUrlFromState();
   return normalized;
 };
 const handleRiverBaseInput = () => {
@@ -805,6 +978,7 @@ const applyMinRiverSeedCells = (value, { silent = false } = {}) => {
   if (!silent) {
     setStatus(`Min river cells set to ${normalized.toLocaleString()}`);
   }
+  syncUrlFromState();
   return normalized;
 };
 const handleRiverSeedInput = () => {
@@ -860,10 +1034,23 @@ const valueToColor = (value, min, max) => {
   return hslToRgb(hue, saturation, lightness);
 };
 
-const DEFAULT_CELL_NOTE =
-  "Stats for selected cell (~0.02°). Drag sliders to tweak max or opacity.";
-const sliderNote = (value) =>
-  `Stats for selected cell (~0.02°). Slider max: ${formatElevation(value)}.`;
+const depthToFloodColor = (depth) => {
+  if (!Number.isFinite(depth)) {
+    return FLOOD_DEPTH_COLORS[0].color;
+  }
+  if (depth < FLOOD_DEPTH_COLORS[0].min) {
+    return FLOOD_DEPTH_COLORS[0].color;
+  }
+  for (const band of FLOOD_DEPTH_COLORS) {
+    if (depth >= band.min && depth < band.max) {
+      return band.color;
+    }
+  }
+  return FLOOD_DEPTH_COLORS[FLOOD_DEPTH_COLORS.length - 1].color;
+};
+
+const DEFAULT_CELL_NOTE = "";
+const sliderNote = () => "";
 
 const generateOverlayDataUrl = (
   tileData,
@@ -894,7 +1081,10 @@ const generateOverlayDataUrl = (
       continue;
     }
     const [r, g, b] = valueToColor(value, min, effectiveMax);
-    const color = mask[i] === 1 ? blendColors([r, g, b], FLOOD_TINT) : [r, g, b];
+    const color =
+      mask[i] === 1
+        ? depthToFloodColor(Math.max(0, waterLevel - value))
+        : [r, g, b];
     out[offset] = color[0];
     out[offset + 1] = color[1];
     out[offset + 2] = color[2];
@@ -936,6 +1126,7 @@ const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) =
     configureSlider();
     updateLegendFromOverlays();
   }
+  syncUrlFromState();
 };
 
 const handleSliderInput = () => {
@@ -951,6 +1142,7 @@ const handleSliderInput = () => {
   }
   reRenderOverlays();
   setStatus(`Max slider set to ${formatElevation(adjusted)}`);
+  syncUrlFromState();
 };
 
 if (maxSliderEl) {
@@ -965,6 +1157,7 @@ const handleOpacityInput = () => {
     opacityValueEl.textContent = `${percentage}%`;
   }
   overlays.forEach(({ layer }) => layer.setOpacity(currentOpacity));
+  syncUrlFromState();
 };
 
 if (opacitySliderEl) {
@@ -993,6 +1186,7 @@ const handleRiverSliderInput = () => {
     updateFloodSummary();
   }
   setStatus(`Water height set to ${formatWaterLevel(riverLevel)}`);
+  syncUrlFromState();
 };
 
 if (riverBaseInputEl) {
@@ -1141,7 +1335,7 @@ async function renderCell(bounds) {
     return;
   }
   const requestId = ++pendingRequestId;
-  setStatus("Fetching DEM for selected cell…", { persistent: true });
+  setStatus("Preparing tile…", { persistent: true });
   startDownloadTracker();
   showProgress(0);
 
@@ -1291,7 +1485,7 @@ map.on("click", (event) => {
   if (value == null) {
     popup.remove();
     if (currentTileData) {
-      setStatus("Click inside a loaded DEM tile to sample.", {
+      setStatus("Click inside a loaded DEM tile to see grid elevation.", {
         persistent: false,
       });
     }
@@ -1527,6 +1721,13 @@ if (searchForm && searchInput) {
   });
 }
 
+if (shareButtonEl) {
+  shareButtonEl.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await copyShareUrl();
+  });
+}
+
 if (multiSelectToggle) {
   multiSelectToggle.addEventListener("change", (event) => {
     multiSelectEnabled = event.target.checked;
@@ -1542,17 +1743,28 @@ if (multiSelectToggle) {
     updateSelectionHighlight();
     configureSlider();
     updateLegendFromOverlays();
+    syncUrlFromState();
   });
 }
 
 disableSlider();
-updateLegend(-50, 4000, "Click a grid cell to stream DEM data.");
+updateLegend(-50, 4000, "Click a tile grid to stream DTM data.");
+applySettingsFromQuery();
+applyTilesFromUrl();
+isInitializing = false;
+syncUrlFromState();
 updateGrid();
-map.on("moveend", updateGrid);
-map.on("zoomend", updateGrid);
+map.on("moveend", () => {
+  updateGrid();
+  syncUrlFromState();
+});
+map.on("zoomend", () => {
+  updateGrid();
+  syncUrlFromState();
+});
 setStatus(
   map.getZoom() < GRID_VISIBILITY_ZOOM
     ? "Zoom in and click on a tile to see DEM data."
-    : "Click a grid cell to stream DEM data.",
+    : "Click a tile grid to stream DTM data.",
   { persistent: true }
 );

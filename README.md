@@ -7,10 +7,12 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - Leaflet grid that highlights selectable ~0.02° cells; clicking a cell downloads only the needed pixels and keeps memory use low.
 - Elevation legend with automatic min/max stats, adjustable max-value stretch slider, and opacity control for blending with the OpenStreetMap base layer.
 - Flood-extent tooling: raise a water-height slider, configure the base river level and the minimum number of low cells that seed rivers, and instantly see connected flood regions tinted on the map with a live cell count.
+- Flood depth palette with fixed bands (0.5–1, 1–2, 2–3, 3–4, 4–5, >5 m) and a compact legend in the top-right that only appears when flooded cells exist.
 - City/province search (including aliases and `lat,lon` queries) with an on-demand global lookup sourced from `worldcities.csv`, plus on-map sampling to inspect exact elevation values.
 - Optional locate button that requests browser geolocation on click and flies to your current position (zoom 14) without preemptive permission prompts.
 - Optional multi-select mode to show and compare several DEM tiles at once, with aggregated stats in the legend.
 - Download progress indicator with byte-based tracking so large tiles feel responsive.
+- Stateful URLs: map center/zoom, opacity, water/base levels, min river cells, multi-select, max-stretch slider, and selected tiles sync into query parameters for sharing via the share button.
 
 ## Repository Layout
 - `index.html` — single-page app shell, styles, and UI controls.
@@ -35,6 +37,11 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - **Multi-select toggle**: Keeps previously fetched cells on the map and aggregates stats in the legend.
 - **Search**: Supports province names, world cities (via the CSV fallback), common aliases, or explicit `latitude,longitude` pairs.
 - **Locate**: Click the GPS button (bottom-right) to request geolocation and center the map on the detected coordinates.
+
+## Sharing State via URL
+- Query params are read on load and updated when you click the share button: `lat`, `lon`, `z`, `opacity`, `water`, `base`, `seed`, `multi`, `max`, `tiles`.
+- `tiles` is a pipe-separated list of bounds keys (`south,west,north,east` with 5 decimals) so selected tiles re-download on load.
+- Example: `?lat=12.5&lon=99.9&z=11.5&water=4&base=2&seed=40&opacity=60&multi=1&max=500&tiles=13.74000,100.52000,13.76000,100.54000|13.76000,100.54000,13.78000,100.56000` restores view, controls, and the listed tiles.
 
 ## Data & Credits
 - DEM: [Ho & Hengl (2025) Global Ensemble Digital Terrain Model 30 m (GEDTM30)](https://doi.org/10.5281/zenodo.14900181).
