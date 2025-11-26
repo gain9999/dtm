@@ -306,6 +306,12 @@
           navigator.userAgent || ""
         );
 
+      const showUiControls = () => {
+        const toolbar = document.querySelector(".toolbar");
+        if (toolbar) toolbar.style.display = "";
+        if (legendContainer) legendContainer.style.display = "";
+      };
+
       const normalizeText = (value) =>
         (value || "")
           .toString()
@@ -531,6 +537,9 @@
                   legendContainer.style.display = "none";
                 }
               }
+            });
+            marker.on("popupclose", () => {
+              showUiControls();
             });
             return {
               ...station,
