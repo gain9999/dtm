@@ -520,6 +520,8 @@
             marker.on("click", () => {
               marker.openPopup();
               map.setView([station.lat, station.lon], Math.max(map.getZoom(), 12));
+              const yOffset = isMobile() ? 160 : 120;
+              map.panBy([0, -yOffset], { animate: false });
               if (isMobile()) {
                 if (document.querySelector(".toolbar")) {
                   document.querySelector(".toolbar").style.display = "none";
