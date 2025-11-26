@@ -501,8 +501,8 @@ const formatElevationPrecise = (value) =>
       })} m`
     : "n/a";
 
-const formatWaterLevel = (value) =>
-  Number.isFinite(value) ? `${value.toFixed(1)} m` : "n/a";
+const formatWaterLevel = (value, digits = 1) =>
+  Number.isFinite(value) ? `${value.toFixed(digits)} m` : "n/a";
 
 const rgbToCss = ([r, g, b]) => `rgb(${r}, ${g}, ${b})`;
 
@@ -781,7 +781,7 @@ const syncUrlFromState = () => {
   params.set("lon", center.lng.toFixed(5));
   params.set("z", map.getZoom().toFixed(2));
   params.set("water", riverLevel.toFixed(1));
-  params.set("base", baseRiverLevel.toFixed(1));
+  params.set("base", baseRiverLevel.toFixed(2));
   params.set("seed", String(minRiverSeedCells));
   params.set("opacity", String(Math.round(currentOpacity * 100)));
   params.set("multi", multiSelectEnabled ? "1" : "0");
@@ -920,7 +920,8 @@ const normalizeBaseRiverLevel = (value) => {
   if (!Number.isFinite(parsed)) {
     return DEFAULT_BASE_RIVER_LEVEL;
   }
-  return Math.max(MIN_BASE_RIVER_LEVEL, parsed);
+  const clamped = Math.max(MIN_BASE_RIVER_LEVEL, parsed);
+  return Math.round(clamped * 100) / 100;
 };
 
 const syncRiverSliderBounds = () => {
@@ -938,7 +939,7 @@ const applyBaseRiverLevel = (value, { silent = false } = {}) => {
   baseRiverLevel = normalized;
   riverLevel = baseRiverLevel;
   if (riverBaseInputEl) {
-    riverBaseInputEl.value = normalized.toFixed(1);
+    riverBaseInputEl.value = normalized.toFixed(2);
   }
   syncRiverSliderBounds();
   updateRiverSliderDisplay();
@@ -948,7 +949,7 @@ const applyBaseRiverLevel = (value, { silent = false } = {}) => {
     updateFloodSummary();
   }
   if (!silent) {
-    setStatus(`Base river level set to ${formatWaterLevel(baseRiverLevel)}`);
+    setStatus(`Base river level set to ${formatWaterLevel(baseRiverLevel, 2)}`);
   }
   syncUrlFromState();
   return normalized;
