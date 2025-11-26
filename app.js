@@ -248,7 +248,27 @@ const esriWorldImageryLayer = L.tileLayer(
   }
 );
 
-openStreetMapLayer.addTo(map);
+const BASE_LAYERS = {
+  streets: openStreetMapLayer,
+  satellite: esriWorldImageryLayer,
+};
+let currentBaseLayerId = "streets";
+
+const setBaseLayer = (layerId) => {
+  const targetId = BASE_LAYERS[layerId] ? layerId : "streets";
+  Object.entries(BASE_LAYERS).forEach(([id, layer]) => {
+    if (map.hasLayer(layer) && id !== targetId) {
+      map.removeLayer(layer);
+    }
+  });
+  const targetLayer = BASE_LAYERS[targetId];
+  if (targetLayer && !map.hasLayer(targetLayer)) {
+    targetLayer.addTo(map);
+  }
+  currentBaseLayerId = targetId;
+};
+
+setBaseLayer(currentBaseLayerId);
 
 L.control
   .layers(
@@ -785,6 +805,7 @@ const syncUrlFromState = () => {
   params.set("seed", String(minRiverSeedCells));
   params.set("opacity", String(Math.round(currentOpacity * 100)));
   params.set("multi", multiSelectEnabled ? "1" : "0");
+  params.set("baselayer", currentBaseLayerId);
   const maxValue = getCurrentMaxSliderValue();
   if (Number.isFinite(maxValue)) {
     params.set("max", String(maxValue));
@@ -854,6 +875,11 @@ const applySettingsFromQuery = () => {
   multiSelectEnabled = multiParam;
   if (multiSelectToggle) {
     multiSelectToggle.checked = multiParam;
+  }
+
+  const baseLayerParam = params.get("baselayer");
+  if (baseLayerParam && BASE_LAYERS[baseLayerParam]) {
+    setBaseLayer(baseLayerParam);
   }
 
   const maxParam = parseNumberParam(params, "max");
@@ -1721,6 +1747,16 @@ if (searchForm && searchInput) {
     await handleSearch(searchInput.value);
   });
 }
+
+map.on("baselayerchange", (event) => {
+  const matched = Object.entries(BASE_LAYERS).find(
+    ([, layer]) => layer === event.layer
+  );
+  if (matched) {
+    currentBaseLayerId = matched[0];
+    syncUrlFromState();
+  }
+});
 
 if (shareButtonEl) {
   shareButtonEl.addEventListener("click", async (event) => {
