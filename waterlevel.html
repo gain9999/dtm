@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thai Water Level Stations</title>
+    <link rel="stylesheet" href="./vendor/leaflet.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+
+      .toolbar {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 500;
+      }
+
+      .search {
+        display: flex;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.96);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+        padding: 8px 10px;
+        align-items: center;
+      }
+
+      .search input {
+        border: 1px solid #d7dde3;
+        border-radius: 8px;
+        padding: 8px 10px;
+        min-width: 220px;
+        font-size: 14px;
+      }
+
+      .search button {
+        border: none;
+        background: #0d6efd;
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      .locate-btn {
+        border: none;
+        background: rgba(255, 255, 255, 0.96);
+        color: #0d6efd;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 14px;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+      }
+
+      .locate-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+        z-index: 500;
+        max-width: 320px;
+        line-height: 1.4;
+        text-align: center;
+      }
+
+      .status.hidden {
+        display: none;
+      }
+
+      .popup-title {
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: 700;
+        color: #0d6efd;
+      }
+
+      .popup-subtitle {
+        margin: 0;
+        font-size: 13px;
+        color: #334155;
+      }
+
+      .popup-link {
+        display: block;
+        margin: 12px auto 0;
+        text-align: center;
+        background: #0d6efd;
+        color: #ffffff !important;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+      }
+
+      .popup-link:link,
+      .popup-link:visited,
+      .popup-link:focus,
+      .popup-link:hover,
+      .popup-link:active {
+        color: #ffffff !important;
+      }
+
+      .legend {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid #d9d9d9;
+        border-radius: 10px;
+        padding: 8px 10px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+        z-index: 500;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+        font-size: 11px;
+        color: #111827;
+      }
+
+      .legend-item {
+        text-align: center;
+      }
+
+      .legend-swatch {
+        display: block;
+        border-radius: 4px;
+        padding: 6px 4px;
+        color: #000;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+      }
+
+      .legend-label {
+        display: block;
+        margin-top: 4px;
+        color: #374151;
+      }
+
+      @media (max-width: 640px) {
+        .toolbar {
+          left: 8px;
+          top: 8px;
+          right: 8px;
+        }
+
+        .search {
+          flex-wrap: wrap;
+        }
+
+        .search input {
+          min-width: 160px;
+          flex: 1 1 120px;
+        }
+
+        .search button,
+        .locate-btn {
+          width: 100%;
+        }
+
+        .legend {
+          left: 8px;
+          right: 8px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 6px;
+        }
+
+        .status {
+          max-width: 240px;
+          font-size: 12px;
+          padding: 8px 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="toolbar">
+      <form class="search" id="search-form">
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Search station or location"
+          autocomplete="off"
+        />
+        <button type="submit">Search</button>
+      </form>
+      <button id="locate-btn" class="locate-btn" type="button">
+        My location
+      </button>
+    </div>
+    <div id="status" class="status hidden"></div>
+
+    <script src="./vendor/leaflet.js"></script>
+    <script>
+      const API_URL =
+        "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load";
+      const map = L.map("map", {
+        worldCopyJump: true,
+        maxZoom: 18,
+        zoomControl: false,
+      }).setView([13.7563, 100.5018], 6);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map);
+
+      L.control
+        .zoom({
+          position: "bottomleft",
+        })
+        .addTo(map);
+
+      const statusEl = document.getElementById("status");
+      const searchForm = document.getElementById("search-form");
+      const searchInput = document.getElementById("search-input");
+      const searchButton =
+        searchForm?.querySelector('button[type="submit"]') || null;
+      const locateBtn = document.getElementById("locate-btn");
+      const markerLayer = L.layerGroup().addTo(map);
+      const legendContainer = document.createElement("div");
+      legendContainer.className = "legend";
+      legendContainer.setAttribute("aria-label", "Water level legend");
+      document.body.appendChild(legendContainer);
+
+      const GRID_STEP_DEG = 0.02;
+      let stationMarkers = [];
+      let locateInFlight = false;
+
+      const LEVELS = [
+        { max: 10, label: "<=10", desc: "น้อยวิกฤต", color: "rgb(219, 128, 43)", textColor: "#000" },
+        { min: 10, max: 30, label: ">10-30", desc: "น้อย", color: "rgb(255, 192, 0)", textColor: "#000" },
+        { min: 30, max: 70, label: ">30-70", desc: "ปกติ", color: "rgb(0, 176, 80)", textColor: "#000" },
+        { min: 70, max: 100, label: ">70-100", desc: "มาก", color: "rgb(0, 60, 250)", textColor: "#fff" },
+        { min: 100, label: ">100", desc: "ล้นตลิ่ง", color: "rgb(255, 0, 0)", textColor: "#fff" },
+      ];
+
+      const setStatus = (message, { hideAfter = 2400 } = {}) => {
+        if (!statusEl) return;
+        statusEl.textContent = message;
+        statusEl.classList.remove("hidden");
+        if (setStatus._timer) clearTimeout(setStatus._timer);
+        if (hideAfter !== null) {
+          setStatus._timer = setTimeout(() => {
+            statusEl.classList.add("hidden");
+          }, hideAfter);
+        }
+      };
+
+      const setControlsEnabled = (enabled) => {
+        if (searchInput) searchInput.disabled = !enabled;
+        if (searchButton) searchButton.disabled = !enabled;
+        if (locateBtn) {
+          const geoUnavailable = !navigator.geolocation;
+          locateBtn.disabled = !enabled || geoUnavailable || locateInFlight;
+          if (geoUnavailable) {
+            locateBtn.textContent = "Location unavailable";
+          } else if (!enabled) {
+            locateBtn.textContent = "Loading stations…";
+          } else {
+            locateBtn.textContent = "My location";
+          }
+        }
+      };
+
+      const normalizeText = (value) =>
+        (value || "")
+          .toString()
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9ก-๙\s]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const extractRows = (payload) => {
+        if (!payload) return [];
+        if (Array.isArray(payload)) return payload;
+        if (Array.isArray(payload.data)) return payload.data;
+        if (Array.isArray(payload.result)) return payload.result;
+        if (payload.data && Array.isArray(payload.data.result))
+          return payload.data.result;
+        if (payload.waterlevel_data && Array.isArray(payload.waterlevel_data.data))
+          return payload.waterlevel_data.data;
+        return [];
+      };
+
+      const getLevelInfo = (rawPercent) => {
+        const percent = Number(rawPercent);
+        if (!Number.isFinite(percent)) return null;
+        return (
+          LEVELS.find(
+            (level) =>
+              (level.min == null || percent > level.min) &&
+              (level.max == null || percent <= level.max)
+          ) || LEVELS[LEVELS.length - 1]
+        );
+      };
+
+      const buildLegend = () => {
+        legendContainer.innerHTML = "";
+        LEVELS.forEach((level) => {
+          const item = document.createElement("div");
+          item.className = "legend-item";
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = level.color;
+          swatch.style.color = level.textColor;
+          swatch.textContent = level.label;
+          const label = document.createElement("span");
+          label.className = "legend-label";
+          label.textContent = level.desc;
+          item.appendChild(swatch);
+          item.appendChild(label);
+          legendContainer.appendChild(item);
+        });
+      };
+
+      const alignToGrid = (value) =>
+        Math.floor(value / GRID_STEP_DEG) * GRID_STEP_DEG;
+
+      const buildTileBounds = (lat, lon) => {
+        const south = alignToGrid(lat);
+        const west = alignToGrid(lon);
+        const north = south + GRID_STEP_DEG;
+        const east = west + GRID_STEP_DEG;
+        return { south, west, north, east };
+      };
+
+      const buildVisualizerUrl = (station) => {
+        const { lat, lon, waterLevel } = station;
+        const wl = Number.isFinite(Number(waterLevel))
+          ? Number(waterLevel)
+          : 3;
+        const bounds = buildTileBounds(lat, lon);
+        const tilesParam = [
+          bounds.south.toFixed(5),
+          bounds.west.toFixed(5),
+          bounds.north.toFixed(5),
+          bounds.east.toFixed(5),
+        ].join(",");
+        const centerLat = ((bounds.south + bounds.north) / 2).toFixed(5);
+        const centerLon = ((bounds.west + bounds.east) / 2).toFixed(5);
+        const params = new URLSearchParams({
+          lat: centerLat,
+          lon: centerLon,
+          z: "15",
+          water: wl.toString(),
+          base: wl.toString(),
+          multi: "1",
+          tiles: tilesParam,
+        });
+        return `./index.html?${params.toString()}`;
+      };
+
+      const formatStation = (raw) => {
+        const station = raw?.station ?? raw;
+        const geocode = raw?.geocode ?? station?.geocode ?? {};
+        const lat = Number(
+          station?.tele_station_lat ?? raw?.tele_station_lat
+        );
+        const lon = Number(
+          station?.tele_station_long ?? raw?.tele_station_long
+        );
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const name =
+          station?.tele_station_name?.th ??
+          station?.tele_station_name ??
+          "Unnamed station";
+        const tumbon =
+          geocode?.tumbon_name?.th ??
+          geocode?.tumbon_name ??
+          station?.tumbon_name?.th ??
+          station?.tumbon_name;
+        const amphoe =
+          geocode?.amphoe_name?.th ??
+          geocode?.amphoe_name ??
+          station?.amphoe_name?.th ??
+          station?.amphoe_name;
+        const province =
+          geocode?.province_name?.th ??
+          geocode?.province_name ??
+          station?.province_name?.th ??
+          station?.province_name;
+        const subtitleParts = [tumbon, amphoe, province].filter(Boolean);
+        const levelInfo = getLevelInfo(raw?.storage_percent);
+        const waterLevel = raw?.waterlevel_msl ?? station?.waterlevel_msl;
+        const minBank = station?.min_bank;
+        const groundLevel = station?.ground_level;
+        const agencyName =
+          raw?.agency?.agency_name?.th ?? raw?.agency?.agency_name ?? "";
+        const updatedAt = raw?.waterlevel_datetime ?? "";
+        const statusText =
+          raw?.diff_wl_bank_text && raw?.diff_wl_bank
+            ? `${raw.diff_wl_bank_text} ${raw.diff_wl_bank}`
+            : raw?.diff_wl_bank_text ??
+              raw?.diff_wl_bank ??
+              "-";
+        return {
+          lat,
+          lon,
+          title: name,
+          subtitle: subtitleParts.join(" · "),
+          levelInfo,
+          waterLevel,
+          minBank,
+          groundLevel,
+          agencyName,
+          updatedAt,
+          statusText,
+          statusColor: levelInfo?.color ?? "#6b7280",
+        };
+      };
+
+      const createMarkerIcon = (levelInfo) => {
+        const color = levelInfo?.color ?? "#6b7280";
+        return L.divIcon({
+          className: "",
+          html: `<div style="
+            width: 18px;
+            height: 18px;
+            background:${color};
+            border:1px solid rgba(0,0,0,0.2);
+            border-radius:3px;
+            box-shadow:0 0 4px rgba(0,0,0,0.25);
+          "></div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        });
+      };
+
+      const formatMeters = (value) => {
+        const num = Number(value);
+        if (Number.isFinite(num)) return num.toFixed(2);
+        if (value === 0) return "0.00";
+        return value ? String(value) : "-";
+      };
+
+      const renderMarkers = (stations) => {
+        markerLayer.clearLayers();
+        stationMarkers = stations
+          .map((station) => {
+            const marker = L.marker([station.lat, station.lon], {
+              icon: createMarkerIcon(station.levelInfo),
+            }).addTo(markerLayer);
+            const popupHtml = `
+              <div>
+                <p class="popup-title">${station.title}</p>
+                <p class="popup-subtitle">${station.subtitle || " "}</p>
+                <p class="popup-subtitle" style="color: ${
+                  station.statusColor
+                }"><strong>สถานะ:</strong> ${station.statusText}</p>
+                <p class="popup-subtitle">ระดับน้ำ ${formatMeters(
+                  station.waterLevel
+                )} (ม.รทก.)</p>
+                <p class="popup-subtitle">ระดับตลิ่ง ${formatMeters(
+                  station.minBank
+                )} (ม.รทก.)</p>
+                <p class="popup-subtitle">ระดับท้องน้ำ ${formatMeters(
+                  station.groundLevel
+                )} (ม.รทก.)</p>
+                <p class="popup-subtitle">ข้อมูล: ${
+                  station.agencyName || "-"
+                }</p>
+                <p class="popup-subtitle">ล่าสุด: ${
+                  station.updatedAt || "-"
+                }</p>
+                <a class="popup-link" href="${buildVisualizerUrl(
+                  station
+                )}" target="_blank" rel="noreferrer">ดูแผนที่น้ำท่วมด้วยระดับน้ำปัจจุบัน</a>
+              </div>
+            `;
+            marker.bindPopup(popupHtml, {
+              autoPan: false,
+              closeButton: true,
+            });
+            marker.on("click", () => marker.openPopup());
+            return {
+              ...station,
+              marker,
+              searchText: normalizeText(
+                `${station.title} ${station.subtitle || ""}`
+              ),
+            };
+          })
+          .filter(Boolean);
+      };
+
+      const loadStations = async () => {
+        setStatus("Loading water level stations…", { hideAfter: null });
+        setControlsEnabled(false);
+        try {
+          const response = await fetch(API_URL);
+          if (!response.ok) {
+            throw new Error(`Request failed (${response.status})`);
+          }
+          const data = await response.json();
+          const rows = extractRows(data);
+          const stations = rows
+            .map((row) => formatStation(row))
+            .filter(Boolean);
+          if (stations.length === 0) {
+            throw new Error("No station data returned.");
+          }
+          renderMarkers(stations);
+          setStatus(`Loaded ${stations.length.toLocaleString()} stations.`);
+          setTimeout(() => statusEl.classList.add("hidden"), 2000);
+          setControlsEnabled(true);
+        } catch (error) {
+          console.error(error);
+          setStatus("Failed to load stations. See console for details.", {
+            hideAfter: null,
+          });
+        }
+      };
+
+      const resetMarkerOpacity = () => {
+        stationMarkers.forEach(({ marker }) => marker.setOpacity(1));
+      };
+
+      const handleSearch = (query) => {
+        const norm = normalizeText(query);
+        if (!norm) {
+          resetMarkerOpacity();
+          setStatus("Showing all stations.");
+          return;
+        }
+        let firstMatch = null;
+        let matchCount = 0;
+        stationMarkers.forEach((entry) => {
+          const isMatch = entry.searchText.includes(norm);
+          entry.marker.setOpacity(isMatch ? 1 : 0.25);
+          if (isMatch && !firstMatch) firstMatch = entry;
+          if (isMatch) matchCount += 1;
+        });
+        if (firstMatch) {
+          map.flyTo([firstMatch.lat, firstMatch.lon], Math.max(map.getZoom(), 11));
+          firstMatch.marker.openPopup();
+          setStatus(`Found ${matchCount} station${matchCount === 1 ? "" : "s"} matching "${query}".`);
+        } else {
+          setStatus(`No stations match "${query}".`);
+        }
+      };
+
+      if (searchForm && searchInput) {
+        searchForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          handleSearch(searchInput.value);
+        });
+        searchInput.addEventListener("input", () => {
+          if (!searchInput.value) {
+            resetMarkerOpacity();
+            statusEl.classList.add("hidden");
+          }
+        });
+      }
+
+      const handleLocate = () => {
+        if (!navigator.geolocation || locateInFlight) return;
+        locateInFlight = true;
+        locateBtn.disabled = true;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            map.flyTo([latitude, longitude], 13);
+            L.circleMarker([latitude, longitude], {
+              radius: 8,
+              color: "#0d6efd",
+              fillColor: "#0d6efd",
+              fillOpacity: 0.35,
+            })
+              .addTo(markerLayer)
+              .bindPopup("You are here")
+              .openPopup();
+            setStatus("Centered on your current location.");
+            locateInFlight = false;
+            locateBtn.disabled = false;
+          },
+          (error) => {
+            console.error(error);
+            setStatus("Unable to fetch your location.", { hideAfter: null });
+            locateInFlight = false;
+            locateBtn.disabled = false;
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          }
+        );
+      };
+
+      if (locateBtn) {
+        if (!navigator.geolocation) {
+          locateBtn.disabled = true;
+          locateBtn.textContent = "Location unavailable";
+        } else {
+          locateBtn.addEventListener("click", handleLocate);
+        }
+      }
+
+      setControlsEnabled(false);
+      buildLegend();
+      loadStations();
+    </script>
+  </body>
+</html>
