@@ -436,12 +436,20 @@ const boundsKey = (bounds) => {
 const findOverlayByKey = (key) =>
   overlays.find((entry) => entry.key === key) ?? null;
 
-const createOverlayEntry = (tileData, floodMaskData, key = boundsKey(tileData.bounds)) => {
+const createOverlayEntry = (
+  tileData,
+  floodMaskData,
+  key = boundsKey(tileData.bounds),
+  colorScaleMin = tileData.min,
+  colorScaleMax = tileData.max
+) => {
   const { url, max, floodCellCount } = generateOverlayDataUrl(
     tileData,
     sliderOverride,
     riverLevel,
-    floodMaskData
+    floodMaskData,
+    colorScaleMin,
+    colorScaleMax
   );
   const layer = L.imageOverlay(url, tileData.bounds, {
     opacity: currentOpacity,
@@ -465,11 +473,25 @@ const createOverlayEntry = (tileData, floodMaskData, key = boundsKey(tileData.bo
 
 const reRenderOverlays = () => {
   const tileDatas = overlays.map((entry) => entry.tileData);
+  const sharedMin =
+    multiSelectEnabled && tileDatas.length > 0
+      ? computeColorScaleMin(tileDatas)
+      : null;
+  const sharedMax =
+    multiSelectEnabled && tileDatas.length > 0 && sliderOverride == null
+      ? computeColorScaleMax(tileDatas)
+      : sliderOverride;
   const floodMaskMap = buildFloodMaskMap(tileDatas, riverLevel);
   overlays.forEach((entry, idx) => {
     overlayLayer.removeLayer(entry.layer);
     const maskData = floodMaskMap.get(entry.tileData);
-    const newEntry = createOverlayEntry(entry.tileData, maskData, entry.key);
+    const newEntry = createOverlayEntry(
+      entry.tileData,
+      maskData,
+      entry.key,
+      sharedMin ?? entry.tileData.min,
+      sharedMax ?? entry.tileData.max
+    );
     overlays[idx] = newEntry;
     if (entry === currentOverlayEntry) {
       currentOverlayEntry = newEntry;
@@ -499,6 +521,22 @@ const updateLegendFromOverlays = () => {
         );
   updateLegend(aggregatedMin, aggregatedMax, "");
   updateFloodSummary();
+};
+
+const computeColorScaleMin = (tileDatas) => {
+  const mins = tileDatas
+    .map((tile) => tile?.min)
+    .filter((value) => Number.isFinite(value));
+  if (mins.length === 0) return null;
+  return mins.reduce((acc, value) => Math.min(acc, value), mins[0]);
+};
+
+const computeColorScaleMax = (tileDatas) => {
+  const maxes = tileDatas
+    .map((tile) => tile?.max)
+    .filter((value) => Number.isFinite(value));
+  if (maxes.length === 0) return null;
+  return maxes.reduce((acc, value) => Math.max(acc, value), maxes[0]);
 };
 
 const clearOverlays = () => {
@@ -1083,14 +1121,15 @@ const generateOverlayDataUrl = (
   tileData,
   maxValue,
   waterLevel = baseRiverLevel,
-  floodMaskData
+  floodMaskData,
+  colorScaleMin = tileData.min,
+  colorScaleMax = tileData.max
 ) => {
   const { values, width, height, min, max, noData } = tileData;
-  const effectiveMax = clamp(
-    maxValue ?? max,
-    min + 1e-3,
-    max
-  );
+  const effectiveMin = Number.isFinite(colorScaleMin) ? colorScaleMin : min;
+  const targetMax = Number.isFinite(colorScaleMax) ? colorScaleMax : max;
+  const maxBound = Number.isFinite(maxValue) ? maxValue : targetMax;
+  const effectiveMax = clamp(maxBound, effectiveMin + 1e-3, targetMax);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -1107,7 +1146,7 @@ const generateOverlayDataUrl = (
       out[offset + 3] = 0;
       continue;
     }
-    const [r, g, b] = valueToColor(value, min, effectiveMax);
+    const [r, g, b] = valueToColor(value, effectiveMin, effectiveMax);
     const color =
       mask[i] === 1
         ? depthToFloodColor(Math.max(0, waterLevel - value))
@@ -1141,7 +1180,24 @@ const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) =
   if (!multiSelectEnabled) {
     clearOverlays();
   }
-  const entry = createOverlayEntry(tileData, undefined, cacheKey);
+  const existingTiles = overlays.map((entry) => entry.tileData);
+  const tilesForScale = multiSelectEnabled
+    ? [...existingTiles, tileData]
+    : [tileData];
+  const sharedMin = multiSelectEnabled
+    ? computeColorScaleMin(tilesForScale)
+    : null;
+  const sharedMax =
+    multiSelectEnabled && sliderOverride == null
+      ? computeColorScaleMax(tilesForScale)
+      : sliderOverride;
+  const entry = createOverlayEntry(
+    tileData,
+    undefined,
+    cacheKey,
+    sharedMin ?? tileData.min,
+    sharedMax ?? tileData.max
+  );
   overlays.push(entry);
   currentOverlayEntry = entry;
   currentTileData = tileData;
