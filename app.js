@@ -7,6 +7,8 @@ const ROW_CHUNK_SIZE = 256;
 const GBA_WFS_ENDPOINT = "https://tubvsig-so2sat-vm1.srv.mwn.de/geoserver/ows?";
 const GBA_LAYER_NAME = "global3D:lod1_global";
 const GBA_SRS = "EPSG:4326";
+const GBA_PAGE_SIZE = 500;
+const GBA_SORT_FIELD = "ogc_fid";
 
 const statusEl = document.getElementById("status");
 const legendNoteEl = document.getElementById("legend-note");
@@ -28,6 +30,7 @@ const searchInput = document.getElementById("search-input");
 const shareButtonEl = document.getElementById("share-button");
 let locateButtonEl = null;
 const progressEl = document.getElementById("progress-indicator");
+const progressLabelEl = document.getElementById("progress-label");
 const progressValueEl = document.getElementById("progress-value");
 const legendEl = document.querySelector(".legend");
 const legendToggleEl = document.getElementById("legend-toggle");
@@ -387,18 +390,29 @@ const setStatus = (text, { persistent = false } = {}) => {
   }
 };
 
-const showProgress = (percent = 0) => {
+let progressOwner = null;
+
+const showProgress = (
+  percent = 0,
+  owner = "dem",
+  label = "Downloading DEM…"
+) => {
+  progressOwner = owner;
   if (!progressEl) return;
   progressEl.classList.remove("hidden");
+  if (progressLabelEl) progressLabelEl.textContent = label;
   if (progressValueEl) progressValueEl.textContent = `${percent}%`;
 };
 
-const updateProgress = (percent) => {
+const updateProgress = (percent, owner = null) => {
+  if (owner && progressOwner && owner !== progressOwner) return;
   if (!progressEl || !progressValueEl) return;
   progressValueEl.textContent = `${percent}%`;
 };
 
-const hideProgress = () => {
+const hideProgress = (owner = null) => {
+  if (owner && progressOwner && owner !== progressOwner) return;
+  progressOwner = null;
   if (!progressEl) return;
   progressEl.classList.add("hidden");
 };
@@ -409,6 +423,22 @@ const startDownloadTracker = () => {
 
 const stopDownloadTracker = () => {
   activeDownloadTracker = null;
+};
+
+let buildingProgressActive = false;
+const startBuildingProgress = () => {
+  buildingProgressActive = true;
+  showProgress(0, "building", "Downloading buildings…");
+};
+const updateBuildingProgress = (percent) => {
+  if (!buildingProgressActive) return;
+  const clamped = clamp(Math.round(percent), 1, 100);
+  updateProgress(clamped, "building");
+};
+const stopBuildingProgress = () => {
+  if (!buildingProgressActive) return;
+  hideProgress("building");
+  buildingProgressActive = false;
 };
 
 const getAggregatedStats = () => {
@@ -585,7 +615,11 @@ const clearBuildingLayers = (resetCache = false) => {
   }
 };
 
-const buildGbaRequestUrl = (bounds) => {
+const buildGbaRequestUrl = (
+  bounds,
+  startIndex = 0,
+  count = GBA_PAGE_SIZE
+) => {
   const [[south, west], [north, east]] = bounds;
   const params = new URLSearchParams({
     service: "WFS",
@@ -596,6 +630,15 @@ const buildGbaRequestUrl = (bounds) => {
     srsName: GBA_SRS,
     bbox: `${west},${south},${east},${north},${GBA_SRS}`,
   });
+  if (GBA_SORT_FIELD) {
+    params.set("sortBy", GBA_SORT_FIELD);
+  }
+  if (count != null) {
+    params.set("count", count);
+  }
+  if (startIndex > 0) {
+    params.set("startIndex", startIndex);
+  }
   return `${GBA_WFS_ENDPOINT}${params.toString()}`;
 };
 
@@ -605,17 +648,87 @@ const fetchBuildingsForBounds = async (bounds, cacheKey) => {
   }
   const controller = new AbortController();
   buildingRequestControllers.set(cacheKey, controller);
-  const url = buildGbaRequestUrl(bounds);
-  const promise = fetch(url, { signal: controller.signal }).then(
-    async (response) => {
+  const promise = (async () => {
+    const fetchPage = async (startIndex, pageSize) => {
+      const url = buildGbaRequestUrl(bounds, startIndex, pageSize);
+      const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const message = body ? `${response.status}: ${body.slice(0, 200)}` : `${response.status}`;
+        throw new Error(`Failed to fetch Global Building Atlas page @${startIndex} (${message})`);
+      }
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch (parseError) {
         throw new Error(
-          `Failed to fetch Global Building Atlas (${response.status})`
+          `Failed to parse Global Building Atlas page @${startIndex}: ${parseError?.message || parseError}`
         );
       }
-      return response.json();
+    };
+
+    const fetchPageWithRetry = async (startIndex, pageSize, attempts = 3) => {
+      let lastError = null;
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          return await fetchPage(startIndex, pageSize);
+        } catch (error) {
+          lastError = error;
+          if (i < attempts - 1) {
+            // Brief backoff to give the WFS a chance to recover.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+      }
+      throw lastError;
+    };
+
+    const pageSizes = Array.from(
+      new Set([GBA_PAGE_SIZE, 200, 100].filter((size) => Number.isFinite(size) && size > 0))
+    );
+    let lastError = null;
+
+    for (const pageSize of pageSizes) {
+      const features = [];
+      let template = null;
+      let startIndex = 0;
+      let total = null;
+      try {
+        startBuildingProgress();
+        updateBuildingProgress(1);
+        while (true) {
+          const data = await fetchPageWithRetry(startIndex, pageSize);
+          const pageFeatures = Array.isArray(data?.features) ? data.features : [];
+          if (!template) {
+            template = data;
+          }
+          features.push(...pageFeatures);
+          const loaded = features.length;
+          if (pageFeatures.length < pageSize) {
+            total = startIndex + pageFeatures.length;
+          }
+          const percent = total
+            ? (loaded / Math.max(total, 1)) * 100
+            : Math.min(90, (loaded / Math.max(loaded + pageSize, 1)) * 100);
+          updateBuildingProgress(percent);
+
+          if (!Number.isFinite(pageSize) || pageFeatures.length < pageSize) {
+            break;
+          }
+          startIndex += pageSize;
+        }
+        updateBuildingProgress(100);
+        const collection = { ...(template || {}), features };
+        collection.features = features;
+        return collection;
+      } catch (error) {
+        lastError = error;
+      } finally {
+        stopBuildingProgress();
+      }
     }
-  );
+    throw lastError;
+  })();
   buildingRequestCache.set(cacheKey, promise);
   try {
     return await promise;
@@ -1741,7 +1854,7 @@ async function renderCell(bounds) {
   const requestId = ++pendingRequestId;
   setStatus("Preparing tile…", { persistent: true });
   startDownloadTracker();
-  showProgress(0);
+  showProgress(0, "dem");
 
   try {
     const meta = await ensureMetadata();
@@ -1799,7 +1912,7 @@ async function renderCell(bounds) {
         1,
         Math.min(100, Math.round((bytesRead / totalBytes) * 100))
       );
-      updateProgress(percent);
+      updateProgress(percent, "dem");
     }
 
     const { noData } = meta;
@@ -1815,7 +1928,7 @@ async function renderCell(bounds) {
 
     if (!Number.isFinite(min) || !Number.isFinite(max)) {
       setStatus("No data in this cell.", { persistent: true });
-      hideProgress();
+      hideProgress("dem");
       stopDownloadTracker();
       if (overlays.length === 0) {
         disableSlider();
@@ -1849,7 +1962,7 @@ async function renderCell(bounds) {
     } else {
       setStatus("DEM tile ready.");
     }
-    hideProgress();
+      hideProgress("dem");
     stopDownloadTracker();
   } catch (error) {
     console.error("Failed to render cell", error);
