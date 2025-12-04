@@ -4,6 +4,9 @@ const COG_URL =
 const GRID_STEP_DEG = 0.02;
 const GRID_VISIBILITY_ZOOM = 10;
 const ROW_CHUNK_SIZE = 256;
+const GBA_WFS_ENDPOINT = "https://tubvsig-so2sat-vm1.srv.mwn.de/geoserver/ows?";
+const GBA_LAYER_NAME = "global3D:lod1_global";
+const GBA_SRS = "EPSG:4326";
 
 const statusEl = document.getElementById("status");
 const legendNoteEl = document.getElementById("legend-note");
@@ -26,9 +29,11 @@ const shareButtonEl = document.getElementById("share-button");
 let locateButtonEl = null;
 const progressEl = document.getElementById("progress-indicator");
 const progressValueEl = document.getElementById("progress-value");
-const multiSelectToggle = document.getElementById("multi-select-toggle");
 const legendEl = document.querySelector(".legend");
 const legendToggleEl = document.getElementById("legend-toggle");
+const affectedBuildingRowEl = document.getElementById("affected-building-row");
+const affectedBuildingCountEl = document.getElementById("affected-building-count");
+const FLOOD_LEGEND_SPACING_PX = 12;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -231,6 +236,11 @@ const map = L.map("map", {
   worldCopyJump: true,
 }).setView(INITIAL_VIEW.center, INITIAL_VIEW.zoom);
 
+const buildingPaneName = "gbaPane";
+map.createPane(buildingPaneName);
+map.getPane(buildingPaneName).style.zIndex = 650;
+map.getPane(buildingPaneName).style.pointerEvents = "auto";
+
 const openStreetMapLayer = L.tileLayer(
   "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {
@@ -271,17 +281,6 @@ const setBaseLayer = (layerId) => {
 setBaseLayer(currentBaseLayerId);
 
 L.control
-  .layers(
-    {
-      Streets: openStreetMapLayer,
-      Satellite: esriWorldImageryLayer,
-    },
-    undefined,
-    { position: "topright" }
-  )
-  .addTo(map);
-
-L.control
   .scale({
     position: "bottomright",
     imperial: false,
@@ -315,6 +314,7 @@ locateControl.addTo(map);
 const gridLayer = L.layerGroup().addTo(map);
 const overlayLayer = L.layerGroup().addTo(map);
 const selectionLayer = L.layerGroup().addTo(map);
+const buildingLayerGroup = L.layerGroup();
 const popup = L.popup({
   closeButton: false,
   autoPanPadding: [32, 32],
@@ -326,11 +326,15 @@ let selectionBounds = null;
 let currentTileData = null;
 let sliderOverride = null;
 let currentOpacity = 0.7;
+let buildingLayerEnabled = false;
+const buildingLayerCache = new Map();
+const buildingRequestCache = new Map();
+const buildingRequestControllers = new Map();
 const DEFAULT_BASE_RIVER_LEVEL = 3;
 const MIN_BASE_RIVER_LEVEL = 0;
 const WATER_LEVEL_MARGIN = 12;
 const DEFAULT_MIN_RIVER_SEED_CELLS = 30;
-const MAX_RIVER_SEED_CELLS = 5000;
+const MAX_RIVER_SEED_CELLS = 10000;
 const FLOOD_DEPTH_COLORS = [
   { min: 0.5, max: 1, color: [148, 197, 233] },
   { min: 1, max: 2, color: [99, 157, 223] },
@@ -345,13 +349,27 @@ let minRiverSeedCells = DEFAULT_MIN_RIVER_SEED_CELLS;
 let imagePromise = null;
 let imageMetadata = null;
 let pendingRequestId = 0;
-let multiSelectEnabled = false;
+let multiSelectEnabled = true;
 let worldCitiesData = null;
 let worldCitiesPromise = null;
 let locateInFlight = false;
 let isInitializing = true;
 const pendingTilesFromUrl = [];
 let shareUrlCache = window.location.pathname;
+
+const layerControl = L.control
+  .layers(
+    {
+      Streets: openStreetMapLayer,
+      Satellite: esriWorldImageryLayer,
+    },
+    {
+      "Global Building Atlas": buildingLayerGroup,
+    },
+    { position: "topright" }
+  )
+  .addTo(map);
+const layerControlEl = layerControl.getContainer();
 
 const setStatus = (text, { persistent = false } = {}) => {
   if (!statusEl) return;
@@ -539,10 +557,199 @@ const computeColorScaleMax = (tileDatas) => {
   return maxes.reduce((acc, value) => Math.max(acc, value), maxes[0]);
 };
 
+const ensureBuildingLayerVisibility = () => {
+  if (buildingLayerEnabled) {
+    if (!map.hasLayer(buildingLayerGroup)) {
+      buildingLayerGroup.addTo(map);
+    }
+  } else if (map.hasLayer(buildingLayerGroup)) {
+    map.removeLayer(buildingLayerGroup);
+  }
+};
+
+const clearBuildingRequests = () => {
+  buildingRequestControllers.forEach((controller) => controller.abort());
+  buildingRequestControllers.clear();
+  buildingRequestCache.clear();
+};
+
+const clearBuildingLayers = (resetCache = false) => {
+  clearBuildingRequests();
+  buildingLayerGroup.clearLayers();
+  if (resetCache) {
+    buildingLayerCache.clear();
+  }
+};
+
+const buildGbaRequestUrl = (bounds) => {
+  const [[south, west], [north, east]] = bounds;
+  const params = new URLSearchParams({
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeName: GBA_LAYER_NAME,
+    outputFormat: "application/json",
+    srsName: GBA_SRS,
+    bbox: `${west},${south},${east},${north},${GBA_SRS}`,
+  });
+  return `${GBA_WFS_ENDPOINT}${params.toString()}`;
+};
+
+const fetchBuildingsForBounds = async (bounds, cacheKey) => {
+  if (buildingRequestCache.has(cacheKey)) {
+    return buildingRequestCache.get(cacheKey);
+  }
+  const controller = new AbortController();
+  buildingRequestControllers.set(cacheKey, controller);
+  const url = buildGbaRequestUrl(bounds);
+  const promise = fetch(url, { signal: controller.signal }).then(
+    async (response) => {
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch Global Building Atlas (${response.status})`
+        );
+      }
+      return response.json();
+    }
+  );
+  buildingRequestCache.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    buildingRequestControllers.delete(cacheKey);
+    buildingRequestCache.delete(cacheKey);
+  }
+};
+
+const buildBuildingPopupContent = (feature, latlng) => {
+  const height = Number(feature?.properties?.height);
+  const elevation = sampleValueAtLatLng(latlng);
+  const heightText = Number.isFinite(height)
+    ? `${height.toFixed(1)} m`
+    : "n/a";
+  const elevationText =
+    elevation != null ? formatElevationPrecise(elevation) : "n/a";
+  return `
+    <div>
+      <div><strong>Building height:</strong> ${heightText}</div>
+      <div><strong>Ground elevation:</strong> ${elevationText}</div>
+    </div>
+  `;
+};
+
+const getCachedBuildingEntry = (cacheKey) => buildingLayerCache.get(cacheKey) || null;
+
+const featureCentroid = (feature) => {
+  const geom = feature?.geometry;
+  if (!geom || !geom.coordinates) return null;
+  const coords = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+  coords.forEach((poly) => {
+    poly.forEach((ring) => {
+      ring.forEach(([x, y]) => {
+        sumX += x;
+        sumY += y;
+        count += 1;
+      });
+    });
+  });
+  if (count === 0) return null;
+  return [sumY / count, sumX / count];
+};
+
+const featureTouchesFlood = (feature, tileData, maskData) => {
+  if (!maskData?.mask || !tileData?.bounds) return false;
+  const centroid = featureCentroid(feature);
+  if (!centroid) return false;
+  const [lat, lng] = centroid;
+  const [[south, west], [north, east]] = tileData.bounds;
+  if (lat < south || lat > north || lng < west || lng > east) return false;
+  const { width, height, mask } = { width: tileData.width, height: tileData.height, mask: maskData.mask };
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+  const latRatio = (north - lat) / Math.max(1e-6, north - south);
+  const lonRatio = (lng - west) / Math.max(1e-6, east - west);
+  const row = clamp(Math.floor(latRatio * height), 0, height - 1);
+  const col = clamp(Math.floor(lonRatio * width), 0, width - 1);
+  return mask[row * width + col] === 1;
+};
+
+const refreshBuildingLayers = () => {
+  clearBuildingLayers(false);
+  ensureBuildingLayerVisibility();
+  if (!buildingLayerEnabled) return;
+  overlays.forEach((entry) => {
+    if (entry?.tileData?.bounds && entry.key) {
+      addBuildingsForTile(entry.tileData.bounds, entry.key);
+    }
+  });
+};
+
+const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
+  if (!buildingLayerEnabled) return;
+  ensureBuildingLayerVisibility();
+  const cached = buildingLayerCache.get(cacheKey);
+  if (cached?.layer) {
+    if (!buildingLayerGroup.hasLayer(cached.layer)) {
+      cached.layer.addTo(buildingLayerGroup);
+    }
+    updateFloodSummary();
+    return;
+  }
+  try {
+    setStatus("Loading Global Building Atlas for this tile…");
+    const data = await fetchBuildingsForBounds(bounds, cacheKey);
+    if (!buildingLayerEnabled) return;
+    if (!findOverlayByKey(cacheKey)) return;
+    const layer = L.geoJSON(data, {
+      pane: buildingPaneName,
+      style: () => ({
+        color: "#000",
+        weight: 1,
+        opacity: 0.5,
+        fillOpacity: 0.05,
+      }),
+      interactive: true,
+      onEachFeature: (feature, featureLayer) => {
+        featureLayer.options.bubblingMouseEvents = false;
+        featureLayer.on("click", (event) => {
+          L.DomEvent.stop(event);
+          if (event?.originalEvent) {
+            event.originalEvent.preventDefault();
+            event.originalEvent.stopPropagation();
+          }
+          const content = buildBuildingPopupContent(feature, event.latlng);
+          L.popup({
+            autoPanPadding: [32, 32],
+          })
+            .setLatLng(event.latlng)
+            .setContent(content)
+            .openOn(map);
+        });
+      },
+    });
+    buildingLayerCache.set(cacheKey, {
+      layer,
+      features: Array.isArray(data?.features) ? data.features : [],
+    });
+    layer.addTo(buildingLayerGroup);
+    updateFloodSummary();
+    setStatus("Global Building Atlas loaded for tile.");
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    console.error("Failed to load Global Building Atlas", error);
+    setStatus("Failed to load Global Building Atlas for this tile.", {
+      persistent: false,
+    });
+  }
+};
+
 const clearOverlays = () => {
   overlays.forEach(({ layer }) => overlayLayer.removeLayer(layer));
   overlays.length = 0;
   currentOverlayEntry = null;
+  clearBuildingLayers(true);
   sliderOverride = null;
   configureSlider();
   updateLegendFromOverlays();
@@ -772,8 +979,30 @@ const updateFloodSummary = () => {
     (sum, entry) => sum + (entry.floodCellCount ?? 0),
     0
   );
+  let affectedBuildings = 0;
+  if (buildingLayerEnabled) {
+    const tileDatas = overlays.map((entry) => entry.tileData);
+    const maskMap = buildFloodMaskMap(tileDatas, riverLevel);
+    tileDatas.forEach((tileData) => {
+      const cacheKey = boundsKey(tileData.bounds);
+      const buildingEntry = getCachedBuildingEntry(cacheKey);
+      const maskData = maskMap.get(tileData);
+      if (!buildingEntry?.features || !maskData) return;
+      buildingEntry.features.forEach((feature) => {
+        if (featureTouchesFlood(feature, tileData, maskData)) {
+          affectedBuildings += 1;
+        }
+      });
+    });
+  }
   if (floodCellCountEl) {
     floodCellCountEl.textContent = totalFloodCells.toLocaleString();
+  }
+  if (affectedBuildingCountEl) {
+    affectedBuildingCountEl.textContent = affectedBuildings.toLocaleString();
+  }
+  if (affectedBuildingRowEl) {
+    affectedBuildingRowEl.style.display = buildingLayerEnabled ? "inline" : "none";
   }
   if (floodLegendEl) {
     floodLegendEl.classList.toggle("hidden", totalFloodCells === 0);
@@ -789,6 +1018,31 @@ const syncLegendToggleState = () => {
     "aria-label",
     collapsed ? "Expand legend panel" : "Collapse legend panel"
   );
+};
+
+const updateFloodLegendPosition = () => {
+  if (!floodLegendEl || !layerControlEl) return;
+  const expanded = layerControlEl.classList.contains(
+    "leaflet-control-layers-expanded"
+  );
+  if (expanded) {
+    const rect = layerControlEl.getBoundingClientRect();
+    const targetTop = rect.bottom + FLOOD_LEGEND_SPACING_PX;
+    floodLegendEl.style.top = `${targetTop}px`;
+  } else {
+    floodLegendEl.style.top = "";
+  }
+};
+
+const observeLayerControl = () => {
+  if (!layerControlEl) return;
+  const observer = new MutationObserver(updateFloodLegendPosition);
+  observer.observe(layerControlEl, { attributes: true, attributeFilter: ["class"] });
+  layerControlEl.addEventListener("click", () => {
+    window.requestAnimationFrame(updateFloodLegendPosition);
+  });
+  window.addEventListener("resize", updateFloodLegendPosition);
+  updateFloodLegendPosition();
 };
 
 const toggleLegend = () => {
@@ -842,7 +1096,7 @@ const syncUrlFromState = () => {
   params.set("base", baseRiverLevel.toFixed(2));
   params.set("seed", String(minRiverSeedCells));
   params.set("opacity", String(Math.round(currentOpacity * 100)));
-  params.set("multi", multiSelectEnabled ? "1" : "0");
+  params.set("gba", buildingLayerEnabled ? "1" : "0");
   params.set("baselayer", currentBaseLayerId);
   const maxValue = getCurrentMaxSliderValue();
   if (Number.isFinite(maxValue)) {
@@ -909,16 +1163,14 @@ const applySettingsFromQuery = () => {
     handleOpacityInput();
   }
 
-  const multiParam = parseBooleanParam(params, "multi", multiSelectEnabled);
-  multiSelectEnabled = multiParam;
-  if (multiSelectToggle) {
-    multiSelectToggle.checked = multiParam;
-  }
-
   const baseLayerParam = params.get("baselayer");
   if (baseLayerParam && BASE_LAYERS[baseLayerParam]) {
     setBaseLayer(baseLayerParam);
   }
+
+  const gbaParam = parseBooleanParam(params, "gba", buildingLayerEnabled);
+  buildingLayerEnabled = gbaParam;
+  ensureBuildingLayerVisibility();
 
   const maxParam = parseNumberParam(params, "max");
   if (maxParam !== null) {
@@ -943,12 +1195,6 @@ const applySettingsFromQuery = () => {
 
 const applyTilesFromUrl = async () => {
   if (pendingTilesFromUrl.length === 0) return;
-  if (!multiSelectEnabled && pendingTilesFromUrl.length > 1) {
-    multiSelectEnabled = true;
-    if (multiSelectToggle) {
-      multiSelectToggle.checked = true;
-    }
-  }
   // Process sequentially to avoid race conditions clobbering slider/selection state.
   for (const key of pendingTilesFromUrl) {
     const parts = key.split(",").map((v) => Number(v));
@@ -1168,6 +1414,11 @@ const generateOverlayDataUrl = (
 const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) => {
   if (!tileData) return;
   const existing = findOverlayByKey(cacheKey);
+  const ensureBuildings = () => {
+    if (buildingLayerEnabled) {
+      addBuildingsForTile(tileData.bounds, cacheKey);
+    }
+  };
   if (existing && multiSelectEnabled) {
     currentOverlayEntry = existing;
     currentTileData = existing.tileData;
@@ -1175,6 +1426,7 @@ const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) =
     updateLegendFromOverlays();
     selectionBounds = null;
     updateSelectionHighlight();
+    ensureBuildings();
     return;
   }
   if (!multiSelectEnabled) {
@@ -1203,6 +1455,7 @@ const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) =
   currentTileData = tileData;
   selectionBounds = null;
   updateSelectionHighlight();
+  ensureBuildings();
   if (multiSelectEnabled) {
     reRenderOverlays();
   } else {
@@ -1415,6 +1668,9 @@ async function renderCell(bounds) {
     updateSelectionHighlight();
     configureSlider();
     updateLegendFromOverlays();
+    if (buildingLayerEnabled) {
+      addBuildingsForTile(bounds, cacheKey);
+    }
     return;
   }
   const requestId = ++pendingRequestId;
@@ -1514,12 +1770,20 @@ async function renderCell(bounds) {
       noData,
       originRow: rowStart,
       originCol: colStart,
+      pixelWidth: meta.pixelWidth,
+      pixelHeight: meta.pixelHeight,
+      rasterMinX: meta.minX,
+      rasterMaxY: meta.maxY,
     };
     if (!multiSelectEnabled) {
       sliderOverride = null;
     }
     applyOverlayFromTile(currentTileData, cacheKey);
-    setStatus("DEM tile ready.");
+    if (buildingLayerEnabled) {
+      setStatus("DEM tile ready. Loading Global Building Atlas…");
+    } else {
+      setStatus("DEM tile ready.");
+    }
     hideProgress();
     stopDownloadTracker();
   } catch (error) {
@@ -1814,6 +2078,27 @@ map.on("baselayerchange", (event) => {
   }
 });
 
+map.on("overlayadd", (event) => {
+  if (event.layer === buildingLayerGroup) {
+    buildingLayerEnabled = true;
+    ensureBuildingLayerVisibility();
+    refreshBuildingLayers();
+    syncUrlFromState();
+    updateFloodLegendPosition();
+    updateFloodSummary();
+  }
+});
+
+map.on("overlayremove", (event) => {
+  if (event.layer === buildingLayerGroup) {
+    buildingLayerEnabled = false;
+    clearBuildingLayers(false);
+    syncUrlFromState();
+    updateFloodLegendPosition();
+    updateFloodSummary();
+  }
+});
+
 if (shareButtonEl) {
   shareButtonEl.addEventListener("click", async (event) => {
     event.preventDefault();
@@ -1821,26 +2106,8 @@ if (shareButtonEl) {
   });
 }
 
-if (multiSelectToggle) {
-  multiSelectToggle.addEventListener("change", (event) => {
-    multiSelectEnabled = event.target.checked;
-    if (!multiSelectEnabled) {
-      clearOverlays();
-      selectionBounds = null;
-    }
-    setStatus(
-      multiSelectEnabled
-        ? "Multi-select enabled. Click multiple cells to compare."
-        : "Multi-select disabled. Previous overlays cleared."
-    );
-    updateSelectionHighlight();
-    configureSlider();
-    updateLegendFromOverlays();
-    syncUrlFromState();
-  });
-}
-
 disableSlider();
+observeLayerControl();
 updateLegend(-50, 4000, "Click a tile grid to stream DTM data.");
 applySettingsFromQuery();
 applyTilesFromUrl();

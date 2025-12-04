@@ -200,6 +200,17 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
+------------------------------------------------------------------------
+Third-Party Data License Notice
+
+GlobalBuildingAtlas data is provided under the MIT License with Commons Clause
+(no commercial use). If you use that dataset, you must comply with its terms:
+
+License: https://github.com/zhu-xlab/GlobalBuildingAtlas/blob/main/LICENSE
+Paper:   Zhu, X. X., Chen, S., Zhang, F., Shi, Y., & Wang, Y. (2025).
+         GlobalBuildingAtlas: An Open Global and Complete Dataset of
+         Building Polygons, Heights and LoD1 3D Models. arXiv:2506.04106.
+
 ----------------------------------------------------------------------
 Additional license information for data
 

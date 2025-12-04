@@ -10,9 +10,10 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - Flood depth palette with fixed bands (0.5–1, 1–2, 2–3, 3–4, 4–5, >5 m) and a compact legend in the top-right that only appears when flooded cells exist.
 - City/province search (including aliases and `lat,lon` queries) with an on-demand global lookup sourced from `worldcities.csv`, plus on-map sampling to inspect exact elevation values.
 - Optional locate button that requests browser geolocation on click and flies to your current position (zoom 14) without preemptive permission prompts.
-- Optional multi-select mode to show and compare several DEM tiles at once, with aggregated stats in the legend.
+- Multi-select is always on so you can compare several DEM tiles at once, with aggregated stats in the legend.
 - Download progress indicator with byte-based tracking so large tiles feel responsive.
-- Stateful URLs: map center/zoom, opacity, water/base levels, min river cells, multi-select, max-stretch slider, and selected tiles sync into query parameters for sharing via the share button.
+- Optional Global Building Atlas overlay (off by default) that you can toggle from the layer control; when enabled, clicking a building shows height and ground elevation, and the flood summary lists affected buildings that intersect the current flood mask.
+- Stateful URLs: map center/zoom, opacity, water/base levels, min river cells, max-stretch slider, selected tiles, and overlay state sync into query parameters for sharing via the share button.
 
 ## Repository Layout
 - `index.html` — single-page app shell, styles, and UI controls.
@@ -39,13 +40,19 @@ Interactive, client-side Leaflet app that streams a 30 m digital elevation mod
 - **Locate**: Click the GPS button (bottom-right) to request geolocation and center the map on the detected coordinates.
 
 ## Sharing State via URL
-- Query params are read on load and updated when you click the share button: `lat`, `lon`, `z`, `opacity`, `water`, `base`, `seed`, `multi`, `max`, `tiles`.
+- Query params are read on load and updated when you click the share button: `lat`, `lon`, `z`, `opacity`, `water`, `base`, `seed`, `max`, `tiles`, `gba`.
 - `tiles` is a pipe-separated list of bounds keys (`south,west,north,east` with 5 decimals) so selected tiles re-download on load.
-- Example: `?lat=12.5&lon=99.9&z=11.5&water=4&base=2&seed=40&opacity=60&multi=1&max=500&tiles=13.74000,100.52000,13.76000,100.54000|13.76000,100.54000,13.78000,100.56000` restores view, controls, and the listed tiles.
+- Example: `?lat=12.5&lon=99.9&z=11.5&water=4&base=2&seed=40&opacity=60&max=500&gba=1&tiles=13.74000,100.52000,13.76000,100.54000|13.76000,100.54000,13.78000,100.56000` restores view, controls, overlay state, and the listed tiles.
 
 ## Data & Credits
 - DEM: [Ho & Hengl (2025) Global Ensemble Digital Terrain Model 30 m (GEDTM30)](https://doi.org/10.5281/zenodo.14900181).
+- Buildings: [GlobalBuildingAtlas](https://github.com/zhu-xlab/GlobalBuildingAtlas) (MIT with Commons Clause — no commercial use; see license link below). Citation:  
+  Zhu, X. X., Chen, S., Zhang, F., Shi, Y., & Wang, Y. (2025). *GlobalBuildingAtlas: An Open Global and Complete Dataset of Building Polygons, Heights and LoD1 3D Models*. arXiv:2506.04106. https://arxiv.org/abs/2506.04106
 - Libraries: [Leaflet](https://leafletjs.com/) and [GeoTIFF.js](https://geotiffjs.github.io/).
+
+## Licensing Notes
+- App code: Apache 2.0 (see `LICENSE`).
+- GlobalBuildingAtlas data: MIT with Commons Clause (no commercial use). License text: https://github.com/zhu-xlab/GlobalBuildingAtlas/blob/main/LICENSE
 
 ## Customization Notes
 - Update `COG_URL` in `app.js` if you want to target a different COG or geographic extent.

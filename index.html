@@ -314,9 +314,9 @@
         width: 80px;
       }
 
-      .citation {
+      .legend .citation {
         margin-top: 14px;
-        font-size: 11px;
+        font-size: 9px;
         color: #b8b8bf;
         line-height: 1.4;
       }
@@ -530,6 +530,11 @@
           <p class="flood-summary">
             Connected flood cells:
             <strong id="flood-cell-count">0</strong>
+            <br />
+            <span id="affected-building-row">
+              No. of affected buildings:
+              <strong id="affected-building-count">0</strong>
+            </span>
           </p>
           <label class="number-control" for="river-seed-input">
             <span>Min river cells</span>
@@ -553,12 +558,8 @@
             />
             <span id="river-slider-value">3.0 m</span>
           </div>
-          <label class="toggle-control">
-            <input type="checkbox" id="multi-select-toggle" />
-            <span>Enable multi-tiles selection</span>
-          </label>
           <p class="citation">
-            Data source:
+            Data sources:
             <a
               href="https://doi.org/10.5281/zenodo.14900181"
               target="_blank"
@@ -566,6 +567,14 @@
             >
               Ho, Y., &amp; Hengl, T. (2025). Global Ensemble Digital Terrain Model 30m
               (GEDTM30).
+            </a>
+            |
+            <a
+              href="https://github.com/zhu-xlab/GlobalBuildingAtlas"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GlobalBuildingAtlas
             </a>
           </p>
         </div>
