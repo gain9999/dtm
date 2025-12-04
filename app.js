@@ -37,8 +37,6 @@ const FLOOD_LEGEND_SPACING_PX = 12;
 let affectedBuildingsDebounce = null;
 let affectedBuildingsJob = null;
 let cachedAffectedBuildings = 0;
-let buildingFreezeMonitor = null;
-let buildingFreezeLastTick = null;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -678,36 +676,6 @@ const featureTouchesFlood = (feature, tileData, maskData) => {
   const row = clamp(Math.floor(latRatio * height), 0, height - 1);
   const col = clamp(Math.floor(lonRatio * width), 0, width - 1);
   return mask[row * width + col] === 1;
-};
-
-const startBuildingFreezeMonitor = () => {
-  if (buildingFreezeMonitor) return;
-  buildingFreezeLastTick = performance.now();
-  const intervalMs = 1000;
-  const thresholdMs = 3000;
-  buildingFreezeMonitor = setInterval(() => {
-    const now = performance.now();
-    const drift = now - buildingFreezeLastTick - intervalMs;
-    buildingFreezeLastTick = now;
-    if (drift > thresholdMs && buildingLayerEnabled) {
-      // Auto-disable buildings if the main thread appears blocked.
-      map.removeLayer(buildingLayerGroup);
-      buildingLayerEnabled = false;
-      clearBuildingLayers(false);
-      updateAffectedBuildingsDisplay();
-      setStatus("Global Building Atlas disabled to keep the map responsive.", {
-        persistent: false,
-      });
-    }
-  }, intervalMs);
-};
-
-const stopBuildingFreezeMonitor = () => {
-  if (buildingFreezeMonitor) {
-    clearInterval(buildingFreezeMonitor);
-    buildingFreezeMonitor = null;
-  }
-  buildingFreezeLastTick = null;
 };
 
 const updateAffectedBuildingsDisplay = () => {
@@ -2179,7 +2147,6 @@ map.on("overlayadd", (event) => {
     updateFloodLegendPosition();
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
-    startBuildingFreezeMonitor();
   }
 });
 
@@ -2191,7 +2158,6 @@ map.on("overlayremove", (event) => {
     updateFloodLegendPosition();
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
-    stopBuildingFreezeMonitor();
   }
 });
 
