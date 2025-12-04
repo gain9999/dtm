@@ -636,7 +636,7 @@ const buildBuildingPopupContent = (feature, latlng) => {
   return `
     <div>
       <div><strong>Building height:</strong> ${heightText}</div>
-      <div><strong>Ground elevation:</strong> ${elevationText}</div>
+      <div><strong>Ground elevation (MSL):</strong> ${elevationText}</div>
     </div>
   `;
 };
@@ -1906,7 +1906,7 @@ map.on("click", (event) => {
   popup
     .setLatLng(latlng)
     .setContent(
-      `Elevation<br><strong>${formatElevationPrecise(value)}</strong>`
+      `Elevation (MSL):<br><strong>${formatElevationPrecise(value)}</strong>`
     )
     .openOn(map);
 });
