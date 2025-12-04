@@ -77,7 +77,7 @@
         position: absolute;
         top: 16px;
         left: 16px;
-        z-index: 500;
+        z-index: 100;
       }
 
       .search-control form {
@@ -87,6 +87,8 @@
         padding: 6px 10px;
         border-radius: 8px;
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        position: relative;
+        z-index: 1;
       }
 
       .search-control input {
@@ -346,6 +348,13 @@
       .leaflet-control-layers-expanded {
         z-index: 1200;
       }
+
+      .leaflet-top.leaflet-right {
+        position: absolute;
+        z-index: 1300;
+        pointer-events: auto;
+      }
+
 
       .leaflet-control-layers-toggle {
         width: 38px;

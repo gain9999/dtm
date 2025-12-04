@@ -33,6 +33,7 @@ const legendEl = document.querySelector(".legend");
 const legendToggleEl = document.getElementById("legend-toggle");
 const affectedBuildingRowEl = document.getElementById("affected-building-row");
 const affectedBuildingCountEl = document.getElementById("affected-building-count");
+const searchControlEl = document.querySelector(".search-control");
 const FLOOD_LEGEND_SPACING_PX = 12;
 let affectedBuildingsDebounce = null;
 let affectedBuildingsJob = null;
@@ -1085,6 +1086,10 @@ const updateFloodLegendPosition = () => {
   const expanded = layerControlEl.classList.contains(
     "leaflet-control-layers-expanded"
   );
+  if (searchControlEl) {
+    const shouldHideSearch = expanded && window.innerWidth <= 768;
+    searchControlEl.style.visibility = shouldHideSearch ? "hidden" : "";
+  }
   if (expanded) {
     const rect = layerControlEl.getBoundingClientRect();
     const targetTop = rect.bottom + FLOOD_LEGEND_SPACING_PX;
