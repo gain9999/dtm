@@ -34,6 +34,8 @@ const legendToggleEl = document.getElementById("legend-toggle");
 const affectedBuildingRowEl = document.getElementById("affected-building-row");
 const affectedBuildingCountEl = document.getElementById("affected-building-count");
 const FLOOD_LEGEND_SPACING_PX = 12;
+let affectedBuildingsDebounce = null;
+let cachedAffectedBuildings = 0;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -675,6 +677,44 @@ const featureTouchesFlood = (feature, tileData, maskData) => {
   return mask[row * width + col] === 1;
 };
 
+const computeAffectedBuildings = () => {
+  if (!buildingLayerEnabled) {
+    cachedAffectedBuildings = 0;
+    return 0;
+  }
+  const tileDatas = overlays.map((entry) => entry.tileData);
+  const maskMap = buildFloodMaskMap(tileDatas, riverLevel);
+  let affectedBuildings = 0;
+  tileDatas.forEach((tileData) => {
+    const cacheKey = boundsKey(tileData.bounds);
+    const buildingEntry = getCachedBuildingEntry(cacheKey);
+    const maskData = maskMap.get(tileData);
+    if (!buildingEntry?.features || !maskData) return;
+    buildingEntry.features.forEach((feature) => {
+      if (featureTouchesFlood(feature, tileData, maskData)) {
+        affectedBuildings += 1;
+      }
+    });
+  });
+  cachedAffectedBuildings = affectedBuildings;
+  return affectedBuildings;
+};
+
+const updateAffectedBuildingsDebounced = () => {
+  if (affectedBuildingsDebounce) {
+    clearTimeout(affectedBuildingsDebounce);
+  }
+  affectedBuildingsDebounce = setTimeout(() => {
+    computeAffectedBuildings();
+    if (affectedBuildingCountEl) {
+      affectedBuildingCountEl.textContent = cachedAffectedBuildings.toLocaleString();
+    }
+    if (affectedBuildingRowEl) {
+      affectedBuildingRowEl.style.display = buildingLayerEnabled ? "inline" : "none";
+    }
+  }, 200);
+};
+
 const refreshBuildingLayers = () => {
   clearBuildingLayers(false);
   ensureBuildingLayerVisibility();
@@ -979,30 +1019,11 @@ const updateFloodSummary = () => {
     (sum, entry) => sum + (entry.floodCellCount ?? 0),
     0
   );
-  let affectedBuildings = 0;
-  if (buildingLayerEnabled) {
-    const tileDatas = overlays.map((entry) => entry.tileData);
-    const maskMap = buildFloodMaskMap(tileDatas, riverLevel);
-    tileDatas.forEach((tileData) => {
-      const cacheKey = boundsKey(tileData.bounds);
-      const buildingEntry = getCachedBuildingEntry(cacheKey);
-      const maskData = maskMap.get(tileData);
-      if (!buildingEntry?.features || !maskData) return;
-      buildingEntry.features.forEach((feature) => {
-        if (featureTouchesFlood(feature, tileData, maskData)) {
-          affectedBuildings += 1;
-        }
-      });
-    });
-  }
   if (floodCellCountEl) {
     floodCellCountEl.textContent = totalFloodCells.toLocaleString();
   }
-  if (affectedBuildingCountEl) {
-    affectedBuildingCountEl.textContent = affectedBuildings.toLocaleString();
-  }
-  if (affectedBuildingRowEl) {
-    affectedBuildingRowEl.style.display = buildingLayerEnabled ? "inline" : "none";
+  if (buildingLayerEnabled) {
+    updateAffectedBuildingsDebounced();
   }
   if (floodLegendEl) {
     floodLegendEl.classList.toggle("hidden", totalFloodCells === 0);
@@ -2086,6 +2107,7 @@ map.on("overlayadd", (event) => {
     syncUrlFromState();
     updateFloodLegendPosition();
     updateFloodSummary();
+    updateAffectedBuildingsDebounced();
   }
 });
 
@@ -2096,6 +2118,7 @@ map.on("overlayremove", (event) => {
     syncUrlFromState();
     updateFloodLegendPosition();
     updateFloodSummary();
+    updateAffectedBuildingsDebounced();
   }
 });
 
