@@ -35,6 +35,7 @@ const affectedBuildingRowEl = document.getElementById("affected-building-row");
 const affectedBuildingCountEl = document.getElementById("affected-building-count");
 const FLOOD_LEGEND_SPACING_PX = 12;
 let affectedBuildingsDebounce = null;
+let affectedBuildingsJob = null;
 let cachedAffectedBuildings = 0;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -677,27 +678,66 @@ const featureTouchesFlood = (feature, tileData, maskData) => {
   return mask[row * width + col] === 1;
 };
 
-const computeAffectedBuildings = () => {
-  if (!buildingLayerEnabled) {
+const updateAffectedBuildingsDisplay = () => {
+  if (affectedBuildingCountEl) {
+    affectedBuildingCountEl.textContent = cachedAffectedBuildings.toLocaleString();
+  }
+  if (affectedBuildingRowEl) {
+    affectedBuildingRowEl.style.display = buildingLayerEnabled ? "inline" : "none";
+  }
+};
+
+const scheduleAffectedBuildingsJob = () => {
+  if (affectedBuildingsJob) {
+    clearTimeout(affectedBuildingsJob);
+    affectedBuildingsJob = null;
+  }
+  if (!buildingLayerEnabled || overlays.length === 0) {
     cachedAffectedBuildings = 0;
-    return 0;
+    updateAffectedBuildingsDisplay();
+    return;
   }
   const tileDatas = overlays.map((entry) => entry.tileData);
   const maskMap = buildFloodMaskMap(tileDatas, riverLevel);
-  let affectedBuildings = 0;
+  const workQueue = [];
   tileDatas.forEach((tileData) => {
     const cacheKey = boundsKey(tileData.bounds);
     const buildingEntry = getCachedBuildingEntry(cacheKey);
     const maskData = maskMap.get(tileData);
-    if (!buildingEntry?.features || !maskData) return;
-    buildingEntry.features.forEach((feature) => {
-      if (featureTouchesFlood(feature, tileData, maskData)) {
-        affectedBuildings += 1;
-      }
-    });
+    if (buildingEntry?.features && maskData) {
+      workQueue.push({ features: buildingEntry.features, tileData, maskData, idx: 0 });
+    }
   });
-  cachedAffectedBuildings = affectedBuildings;
-  return affectedBuildings;
+  if (workQueue.length === 0) {
+    cachedAffectedBuildings = 0;
+    updateAffectedBuildingsDisplay();
+    return;
+  }
+
+  const processChunk = () => {
+    const start = performance.now();
+    const budgetMs = 12;
+    while (workQueue.length > 0) {
+      const current = workQueue[0];
+      for (; current.idx < current.features.length; current.idx += 1) {
+        const feature = current.features[current.idx];
+        if (featureTouchesFlood(feature, current.tileData, current.maskData)) {
+          cachedAffectedBuildings += 1;
+        }
+        if (performance.now() - start > budgetMs) {
+          affectedBuildingsJob = setTimeout(processChunk, 0);
+          return;
+        }
+      }
+      workQueue.shift();
+    }
+    affectedBuildingsJob = null;
+    updateAffectedBuildingsDisplay();
+  };
+
+  // Reset count before starting.
+  cachedAffectedBuildings = 0;
+  affectedBuildingsJob = setTimeout(processChunk, 0);
 };
 
 const updateAffectedBuildingsDebounced = () => {
@@ -705,14 +745,8 @@ const updateAffectedBuildingsDebounced = () => {
     clearTimeout(affectedBuildingsDebounce);
   }
   affectedBuildingsDebounce = setTimeout(() => {
-    computeAffectedBuildings();
-    if (affectedBuildingCountEl) {
-      affectedBuildingCountEl.textContent = cachedAffectedBuildings.toLocaleString();
-    }
-    if (affectedBuildingRowEl) {
-      affectedBuildingRowEl.style.display = buildingLayerEnabled ? "inline" : "none";
-    }
-  }, 200);
+    scheduleAffectedBuildingsJob();
+  }, 120);
 };
 
 const refreshBuildingLayers = () => {
@@ -735,6 +769,7 @@ const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
       cached.layer.addTo(buildingLayerGroup);
     }
     updateFloodSummary();
+    updateAffectedBuildingsDebounced();
     return;
   }
   try {
@@ -775,6 +810,7 @@ const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
     });
     layer.addTo(buildingLayerGroup);
     updateFloodSummary();
+    updateAffectedBuildingsDebounced();
     setStatus("Global Building Atlas loaded for tile.");
   } catch (error) {
     if (error?.name === "AbortError") return;
@@ -1022,8 +1058,11 @@ const updateFloodSummary = () => {
   if (floodCellCountEl) {
     floodCellCountEl.textContent = totalFloodCells.toLocaleString();
   }
-  if (buildingLayerEnabled) {
-    updateAffectedBuildingsDebounced();
+  if (buildingLayerEnabled && overlays.length > 0) {
+    scheduleAffectedBuildingsJob();
+  } else {
+    cachedAffectedBuildings = 0;
+    updateAffectedBuildingsDisplay();
   }
   if (floodLegendEl) {
     floodLegendEl.classList.toggle("hidden", totalFloodCells === 0);
