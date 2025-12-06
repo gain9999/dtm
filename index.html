@@ -208,31 +208,48 @@
         background: none !important;
         border: none !important;
         margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
       }
 
-      .leaflet-control-locate .locate-button {
+      .leaflet-control-locate .locate-button,
+      .leaflet-control-locate .rotate-button {
         border: none;
         border-radius: 50%;
         width: 48px;
         height: 48px;
         background: rgba(10, 10, 16, 0.92);
-        color: #0a0a10;
+        color: #f7f7f8;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-        transition: background 0.2s ease, color 0.2s ease;
+        transition: background 0.2s ease, color 0.2s ease, opacity 0.3s ease;
       }
 
       .leaflet-control-locate .locate-button:hover,
-      .leaflet-control-locate .locate-button:focus-visible {
+      .leaflet-control-locate .locate-button:focus-visible,
+      .leaflet-control-locate .rotate-button:hover,
+      .leaflet-control-locate .rotate-button:focus-visible {
         background: rgba(77, 163, 255, 0.95);
+        color: #0a0a10;
       }
 
       .leaflet-control-locate .locate-button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+
+      .rotate-button.hidden {
+        display: none;
+      }
+
+      .leaflet-control-locate .locate-button svg,
+      .leaflet-control-locate .rotate-button svg {
+        width: 24px;
+        height: 24px;
       }
 
       .colorbar {
@@ -647,6 +664,7 @@
 
     <script src="./vendor/leaflet.js"></script>
     <script src="./vendor/geotiff.min.js"></script>
-    <script src="./app.js"></script>
+    <script src="./vendor/deck.gl.9p2p3.min.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

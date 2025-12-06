@@ -29,6 +29,9 @@ const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
 const shareButtonEl = document.getElementById("share-button");
 let locateButtonEl = null;
+let rotateLeftBtn = null;
+let rotateRightBtn = null;
+let currentViewState = null;
 const progressEl = document.getElementById("progress-indicator");
 const progressLabelEl = document.getElementById("progress-label");
 const progressValueEl = document.getElementById("progress-value");
@@ -297,6 +300,35 @@ L.control
 const locateControl = L.control({ position: "bottomright" });
 locateControl.onAdd = () => {
   const container = L.DomUtil.create("div", "leaflet-control-locate");
+  
+  const createRotateBtn = (dir) => {
+    const btn = L.DomUtil.create("button", "rotate-button hidden", container);
+    btn.type = "button";
+    btn.title = dir === "left" ? "Rotate left" : "Rotate right";
+    btn.innerHTML = dir === "left" 
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`;
+    
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => {
+      e.preventDefault();
+      if (deckgl && currentViewState) {
+        const delta = dir === "left" ? -45 : 45;
+        currentViewState = {
+            ...currentViewState,
+            bearing: currentViewState.bearing + delta,
+            transitionDuration: 300,
+            transitionInterpolator: new deck.LinearInterpolator(['bearing'])
+        };
+        deckgl.setProps({ viewState: currentViewState });
+      }
+    });
+    return btn;
+  };
+
+  rotateLeftBtn = createRotateBtn("left");
+  rotateRightBtn = createRotateBtn("right");
+
   const button = L.DomUtil.create("button", "locate-button", container);
   button.type = "button";
   button.title = "Go to my location";
@@ -322,6 +354,7 @@ const gridLayer = L.layerGroup().addTo(map);
 const overlayLayer = L.layerGroup().addTo(map);
 const selectionLayer = L.layerGroup().addTo(map);
 const buildingLayerGroup = L.layerGroup();
+const threeDRenderLayer = L.layerGroup();
 const popup = L.popup({
   closeButton: false,
   autoPanPadding: [32, 32],
@@ -363,6 +396,9 @@ let locateInFlight = false;
 let isInitializing = true;
 const pendingTilesFromUrl = [];
 let shareUrlCache = window.location.pathname;
+let deckgl = null;
+let deckGLLayer = null;
+let is3DViewActive = false;
 
 const layerControl = L.control
   .layers(
@@ -372,6 +408,7 @@ const layerControl = L.control
     },
     {
       "Global Building Atlas": buildingLayerGroup,
+      "3D View": threeDRenderLayer,
     },
     { position: "topright" }
   )
@@ -551,6 +588,7 @@ const reRenderOverlays = () => {
   });
   configureSlider();
   updateLegendFromOverlays();
+  updateDeckGL();
   syncUrlFromState();
 };
 
@@ -872,6 +910,7 @@ const refreshBuildingLayers = () => {
       addBuildingsForTile(entry.tileData.bounds, entry.key);
     }
   });
+  updateDeckGL();
 };
 
 const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
@@ -884,6 +923,7 @@ const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
     }
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
+    updateDeckGL();
     return;
   }
   try {
@@ -925,6 +965,7 @@ const addBuildingsForTile = async (bounds, cacheKey = boundsKey(bounds)) => {
     layer.addTo(buildingLayerGroup);
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
+    updateDeckGL();
     setStatus("Global Building Atlas loaded for tile.");
   } catch (error) {
     if (error?.name === "AbortError") return;
@@ -1640,6 +1681,7 @@ const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) =
     configureSlider();
     updateLegendFromOverlays();
   }
+  updateDeckGL();
   syncUrlFromState();
 };
 
@@ -1700,6 +1742,7 @@ const handleRiverSliderInput = () => {
     updateFloodSummary();
   }
   setStatus(`Water height set to ${formatWaterLevel(riverLevel)}`);
+  updateDeckGL();
   syncUrlFromState();
 };
 
@@ -1835,6 +1878,169 @@ async function handleCellSelection(bounds) {
   popup.remove();
   await renderCell(bounds);
 }
+
+const initializeDeckGL = () => {
+  if (deckgl) return;
+
+  const mapContainer = document.getElementById("map");
+  const deckContainer = document.createElement("div");
+  deckContainer.id = "deckgl-container";
+  deckContainer.style.position = "absolute";
+  deckContainer.style.top = "0";
+  deckContainer.style.left = "0";
+  deckContainer.style.width = "100%";
+  deckContainer.style.height = "100%";
+  deckContainer.style.zIndex = "800"; // Above map tiles but below controls
+  mapContainer.appendChild(deckContainer);
+
+  currentViewState = {
+    longitude: map.getCenter().lng,
+    latitude: map.getCenter().lat,
+    zoom: map.getZoom(),
+    pitch: 45,
+    bearing: 0
+  };
+
+  deckgl = new deck.DeckGL({
+    container: deckContainer,
+    viewState: currentViewState,
+    controller: true,
+    layers: [],
+    onViewStateChange: ({ viewState }) => {
+       currentViewState = viewState;
+       deckgl.setProps({ viewState: currentViewState });
+    }
+  });
+
+  if (rotateLeftBtn) rotateLeftBtn.classList.remove("hidden");
+  if (rotateRightBtn) rotateRightBtn.classList.remove("hidden");
+
+  updateDeckGL();
+};
+
+const destroyDeckGL = () => {
+  if (deckgl) {
+    deckgl.finalize();
+    deckgl = null;
+  }
+  const deckContainer = document.getElementById("deckgl-container");
+  if (deckContainer) {
+    deckContainer.remove();
+  }
+  if (rotateLeftBtn) rotateLeftBtn.classList.add("hidden");
+  if (rotateRightBtn) rotateRightBtn.classList.add("hidden");
+  currentViewState = null;
+};
+
+const updateDeckGL = () => {
+  if (!deckgl || !is3DViewActive) return;
+
+  const layers = [];
+
+  const basemapUrl = currentBaseLayerId === 'satellite'
+    ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+    : 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+  // Basemap
+  layers.push(
+    new deck.TileLayer({
+      id: 'basemap',
+      data: basemapUrl,
+      minZoom: 0,
+      maxZoom: 19,
+      tileSize: 256,
+      renderSubLayers: props => {
+        const {
+          bbox: {west, south, east, north}
+        } = props.tile;
+
+        return new deck.BitmapLayer(props, {
+          data: null,
+          image: props.data,
+          bounds: [west, south, east, north]
+        });
+      }
+    })
+  );
+
+  const buildingFeatures = [];
+  buildingLayerCache.forEach(entry => {
+    if (entry.features) {
+      buildingFeatures.push(...entry.features);
+    }
+  });
+
+  if (buildingFeatures.length > 0) {
+    const buildingLayer = new deck.GeoJsonLayer({
+      id: 'buildings',
+      data: buildingFeatures,
+      extruded: true,
+      getElevation: f => Number(f.properties.height) || 0,
+      getFillColor: [200, 200, 200],
+      getLineColor: [100, 100, 100],
+      lineWidthMinPixels: 1,
+    });
+    layers.push(buildingLayer);
+  }
+
+  const allTileDatas = overlays.map(entry => entry.tileData);
+  if (allTileDatas.length === 0 && currentTileData) {
+    allTileDatas.push(currentTileData);
+  }
+
+  if (allTileDatas.length > 0 && riverLevel > baseRiverLevel) {
+    const floodPolygons = [];
+    const floodMaskMap = buildFloodMaskMap(allTileDatas, riverLevel);
+
+    for (const tileData of allTileDatas) {
+      const { values, width, height, bounds } = tileData;
+      const [[south, west], [north, east]] = bounds;
+      const floodMaskData = floodMaskMap.get(tileData);
+
+      if (floodMaskData) {
+        const { mask } = floodMaskData;
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            if (mask[i] === 1) {
+              const lon = west + (x / width) * (east - west);
+              const lat = north - (y / height) * (north - south);
+              const lonNext = west + ((x + 1) / width) * (east - west);
+              const latNext = north - ((y + 1) / height) * (north - south);
+              const depth = Math.max(0, riverLevel - values[i]);
+              floodPolygons.push({
+                polygon: [
+                  [lon, lat],
+                  [lon, latNext],
+                  [lonNext, latNext],
+                  [lonNext, lat],
+                  [lon, lat]
+                ],
+                depth,
+                color: [...depthToFloodColor(depth), 200]
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    if (floodPolygons.length > 0) {
+      const floodLayer = new deck.PolygonLayer({
+        id: 'flood-layer',
+        data: floodPolygons,
+        getPolygon: d => d.polygon,
+        getFillColor: d => d.color,
+        extruded: true,
+        getElevation: d => d.depth,
+      });
+      layers.push(floodLayer);
+    }
+  }
+
+
+  deckgl.setProps({ layers });
+};
 
 async function renderCell(bounds) {
   const cacheKey = boundsKey(bounds);
@@ -2253,6 +2459,7 @@ map.on("baselayerchange", (event) => {
   if (matched) {
     currentBaseLayerId = matched[0];
     syncUrlFromState();
+    updateDeckGL();
   }
 });
 
@@ -2266,6 +2473,19 @@ map.on("overlayadd", (event) => {
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
   }
+  if (event.layer === threeDRenderLayer) {
+    is3DViewActive = true;
+    initializeDeckGL();
+    updateDeckGL();
+    // If buildings are not enabled, enable them in 3D view
+    if (!buildingLayerEnabled) {
+      setTimeout(() => {
+        if (!map.hasLayer(buildingLayerGroup)) {
+          map.addLayer(buildingLayerGroup);
+        }
+      }, 0);
+    }
+  }
 });
 
 map.on("overlayremove", (event) => {
@@ -2276,6 +2496,10 @@ map.on("overlayremove", (event) => {
     updateFloodLegendPosition();
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
+  }
+  if (event.layer === threeDRenderLayer) {
+    is3DViewActive = false;
+    destroyDeckGL();
   }
 });
 
