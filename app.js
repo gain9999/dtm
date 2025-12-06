@@ -1480,6 +1480,7 @@ const applyBaseRiverLevel = (value, { silent = false } = {}) => {
   if (!silent) {
     setStatus(`Base river level set to ${formatWaterLevel(baseRiverLevel, 2)}`);
   }
+  updateDeckGL();
   syncUrlFromState();
   return normalized;
 };
@@ -1508,6 +1509,7 @@ const applyMinRiverSeedCells = (value, { silent = false } = {}) => {
   if (!silent) {
     setStatus(`Min river cells set to ${normalized.toLocaleString()}`);
   }
+  updateDeckGL();
   syncUrlFromState();
   return normalized;
 };
