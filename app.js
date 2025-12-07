@@ -1990,7 +1990,7 @@ function updateDeckGL() {
     allTileDatas.push(currentTileData);
   }
 
-  if (allTileDatas.length > 0 && riverLevel > baseRiverLevel) {
+  if (allTileDatas.length > 0) {
     const floodPolygons = [];
     const floodMaskMap = buildFloodMaskMap(allTileDatas, riverLevel);
 
