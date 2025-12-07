@@ -1881,7 +1881,7 @@ async function handleCellSelection(bounds) {
   await renderCell(bounds);
 }
 
-const initializeDeckGL = () => {
+function initializeDeckGL() {
   if (deckgl) return;
 
   const mapContainer = document.getElementById("map");
@@ -1918,9 +1918,9 @@ const initializeDeckGL = () => {
   if (rotateRightBtn) rotateRightBtn.classList.remove("hidden");
 
   updateDeckGL();
-};
+}
 
-const destroyDeckGL = () => {
+function destroyDeckGL() {
   if (deckgl) {
     deckgl.finalize();
     deckgl = null;
@@ -1932,9 +1932,9 @@ const destroyDeckGL = () => {
   if (rotateLeftBtn) rotateLeftBtn.classList.add("hidden");
   if (rotateRightBtn) rotateRightBtn.classList.add("hidden");
   currentViewState = null;
-};
+}
 
-const updateDeckGL = () => {
+function updateDeckGL() {
   if (!deckgl || !is3DViewActive) return;
 
   const layers = [];
@@ -2042,7 +2042,7 @@ const updateDeckGL = () => {
 
 
   deckgl.setProps({ layers });
-};
+}
 
 async function renderCell(bounds) {
   const cacheKey = boundsKey(bounds);
