@@ -266,11 +266,11 @@
       let locateInFlight = false;
 
       const LEVELS = [
-        { max: 10, label: "<=10", desc: "น้อยวิกฤต", color: "rgb(219, 128, 43)", textColor: "#000" },
-        { min: 10, max: 30, label: ">10-30", desc: "น้อย", color: "rgb(255, 192, 0)", textColor: "#000" },
-        { min: 30, max: 70, label: ">30-70", desc: "ปกติ", color: "rgb(0, 176, 80)", textColor: "#000" },
-        { min: 70, max: 100, label: ">70-100", desc: "มาก", color: "rgb(0, 60, 250)", textColor: "#fff" },
-        { min: 100, label: ">100", desc: "ล้นตลิ่ง", color: "rgb(255, 0, 0)", textColor: "#fff" },
+        { max: 10, label: "<=10%", desc: "น้อยวิกฤต", color: "rgb(219, 128, 43)", textColor: "#000" },
+        { min: 10, max: 30, label: ">10-30%", desc: "น้อย", color: "rgb(255, 192, 0)", textColor: "#000" },
+        { min: 30, max: 70, label: ">30-70%", desc: "ปกติ", color: "rgb(0, 176, 80)", textColor: "#000" },
+        { min: 70, max: 100, label: ">70-100%", desc: "มาก", color: "rgb(0, 60, 250)", textColor: "#fff" },
+        { min: 100, label: ">100%", desc: "ล้นตลิ่ง", color: "rgb(255, 0, 0)", textColor: "#fff" },
       ];
 
       const setStatus = (message, { hideAfter = 2400 } = {}) => {
