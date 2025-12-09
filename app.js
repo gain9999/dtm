@@ -532,7 +532,7 @@ const createOverlayEntry = (
   colorScaleMin = tileData.min,
   colorScaleMax = tileData.max
 ) => {
-  const { url, max, floodCellCount } = generateOverlayDataUrl(
+  const { url, max, floodCellCount, floodMaskData: appliedFloodMask } = generateOverlayDataUrl(
     tileData,
     sliderOverride,
     riverLevel,
@@ -557,6 +557,7 @@ const createOverlayEntry = (
     effectiveMax: max,
     isOverride: sliderOverride !== null,
     floodCellCount,
+    floodMaskData: appliedFloodMask,
   };
 };
 
@@ -778,16 +779,18 @@ const fetchBuildingsForBounds = async (bounds, cacheKey) => {
 
 const buildBuildingPopupContent = (feature, latlng) => {
   const height = Number(feature?.properties?.height);
-  const elevation = sampleValueAtLatLng(latlng);
+  const { elevation, depth } = getFloodDepthAtLatLng(latlng);
   const heightText = Number.isFinite(height)
     ? `${height.toFixed(1)} m`
     : "n/a";
   const elevationText =
     elevation != null ? formatElevationPrecise(elevation) : "n/a";
+  const depthText = formatWaterLevel(depth);
   return `
     <div>
       <div><strong>Building height:</strong> ${heightText}</div>
       <div><strong>Ground elevation (MSL):</strong> ${elevationText}</div>
+      <div><strong>Flood depth:</strong> ${depthText}</div>
     </div>
   `;
 };
@@ -1603,8 +1606,8 @@ const generateOverlayDataUrl = (
   const ctx = canvas.getContext("2d");
   const imageData = ctx.createImageData(width, height);
   const out = imageData.data;
-  const { mask, count: floodCellCount } =
-    floodMaskData ?? computeConnectedFloodMask(tileData, waterLevel);
+  const maskData = floodMaskData ?? computeConnectedFloodMask(tileData, waterLevel);
+  const { mask, count: floodCellCount } = maskData;
 
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i];
@@ -1629,6 +1632,7 @@ const generateOverlayDataUrl = (
     url: canvas.toDataURL("image/png"),
     max: effectiveMax,
     floodCellCount,
+    floodMaskData: maskData,
   };
 };
 
@@ -2180,7 +2184,7 @@ async function renderCell(bounds) {
   }
 }
 
-const sampleValueAtLatLng = (latlng) => {
+const sampleElevationAtLatLng = (latlng) => {
   const candidateTiles = [];
   if (currentOverlayEntry?.tileData) {
     candidateTiles.push(currentOverlayEntry.tileData);
@@ -2206,16 +2210,56 @@ const sampleValueAtLatLng = (latlng) => {
     const value = values[row * width + col];
     if (!Number.isFinite(value) || value === noData) continue;
     currentTileData = tileData;
-    return value;
+    return {
+      elevation: value,
+      tileData,
+      row,
+      col,
+    };
   }
-  return null;
+  return {
+    elevation: null,
+    tileData: null,
+    row: null,
+    col: null,
+  };
+};
+
+const sampleValueAtLatLng = (latlng) => {
+  const { elevation } = sampleElevationAtLatLng(latlng);
+  return elevation;
+};
+
+const getFloodDepthAtLatLng = (latlng) => {
+  const { elevation, tileData, row, col } = sampleElevationAtLatLng(latlng);
+  if (elevation == null || !tileData) {
+    return { depth: null, flooded: false, elevation: null };
+  }
+  let depth = Math.max(0, riverLevel - elevation);
+  let flooded = depth > 0;
+  const overlayEntry =
+    overlays.find((entry) => entry.tileData === tileData) ?? null;
+  const mask = overlayEntry?.floodMaskData?.mask;
+  if (mask && Number.isInteger(row) && Number.isInteger(col)) {
+    const idx = row * tileData.width + col;
+    if (idx >= 0 && idx < mask.length) {
+      const maskValue = mask[idx];
+      if (maskValue === 1) {
+        flooded = true;
+      } else if (maskValue === 0) {
+        flooded = false;
+        depth = 0;
+      }
+    }
+  }
+  return { depth, flooded, elevation };
 };
 
 map.on("click", (event) => {
   const { latlng } = event;
   if (!latlng) return;
-  const value = sampleValueAtLatLng(latlng);
-  if (value == null) {
+  const { elevation, depth } = getFloodDepthAtLatLng(latlng);
+  if (elevation == null) {
     popup.remove();
     if (currentTileData) {
       setStatus("Click inside a loaded DEM tile to see grid elevation.", {
@@ -2227,7 +2271,10 @@ map.on("click", (event) => {
   popup
     .setLatLng(latlng)
     .setContent(
-      `Elevation (MSL):<br><strong>${formatElevationPrecise(value)}</strong>`
+      `<div>
+        <div><strong>Elevation (MSL):</strong> ${formatElevationPrecise(elevation)}</div>
+        <div><strong>Flood depth:</strong> ${formatWaterLevel(depth)}</div>
+      </div>`
     )
     .openOn(map);
 });
