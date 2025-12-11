@@ -102,17 +102,49 @@
         display: none;
       }
 
-      .popup-title {
-        margin: 0 0 4px;
+      .leaflet-popup-content .popup-title {
+        margin: 0 0 2px;
         font-size: 15px;
         font-weight: 700;
         color: #0d6efd;
+        line-height: 1.15;
       }
 
-      .popup-subtitle {
-        margin: 0;
+      .leaflet-popup-content .popup-subtitle {
+        margin: 0 0 4px;
         font-size: 13px;
         color: #334155;
+        line-height: 1.2;
+      }
+
+      .popup-rows {
+        margin: 8px 0;
+        display: grid;
+        gap: 6px;
+      }
+
+      .popup-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 13px;
+        color: #334155;
+      }
+
+      .popup-label {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .popup-label-light {
+        font-weight: 400;
+      }
+
+      .popup-value {
+        justify-self: end;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
 
       .popup-link {
@@ -232,6 +264,7 @@
     <script>
       const API_URL =
         "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load";
+      const buildApiUrl = () => `${API_URL}?timestamp=${Date.now()}`;
       const map = L.map("map", {
         worldCopyJump: true,
         maxZoom: 18,
@@ -497,24 +530,42 @@
               <div>
                 <p class="popup-title">${station.title}</p>
                 <p class="popup-subtitle">${station.subtitle || " "}</p>
-                <p class="popup-subtitle" style="color: ${
-                  station.statusColor
-                }"><strong>สถานะ:</strong> ${station.statusText}</p>
-                <p class="popup-subtitle">ระดับน้ำ ${formatMeters(
-                  station.waterLevel
-                )} (ม.รทก.)</p>
-                <p class="popup-subtitle">ระดับตลิ่ง ${formatMeters(
-                  station.minBank
-                )} (ม.รทก.)</p>
-                <p class="popup-subtitle">ระดับท้องน้ำ ${formatMeters(
-                  station.groundLevel
-                )} (ม.รทก.)</p>
-                <p class="popup-subtitle">ข้อมูล: ${
-                  station.agencyName || "-"
-                }</p>
-                <p class="popup-subtitle">ล่าสุด: ${
-                  station.updatedAt || "-"
-                }</p>
+                <div class="popup-rows">
+                  <div class="popup-row" style="color:${station.statusColor}">
+                    <span class="popup-label">สถานะ</span>
+                    <span class="popup-value">${station.statusText}</span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label">ระดับน้ำ</span>
+                    <span class="popup-value">${formatMeters(
+                      station.waterLevel
+                    )} ม.รทก.</span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label">ระดับตลิ่ง</span>
+                    <span class="popup-value">${formatMeters(
+                      station.minBank
+                    )} ม.รทก.</span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label">ระดับท้องน้ำ</span>
+                    <span class="popup-value">${formatMeters(
+                      station.groundLevel
+                    )} ม.รทก.</span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label popup-label-light" aria-hidden="true"></span>
+                    <span class="popup-value" aria-hidden="true" style="width:100%; border-bottom:1px solid #e2e8f0;"></span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label popup-label-light">ข้อมูล:</span>
+                    <span class="popup-value">${station.agencyName || "-"}</span>
+                  </div>
+                  <div class="popup-row">
+                    <span class="popup-label popup-label-light">ล่าสุด:</span>
+                    <span class="popup-value">${station.updatedAt || "-"}</span>
+                  </div>
+                </div>
                 <a class="popup-link" href="${buildVisualizerUrl(
                   station
                 )}" target="_blank" rel="noreferrer"> ดูแผนที่น้ำท่วมด้วยระดับน้ำล่าสุด</a>
@@ -556,7 +607,7 @@
         setStatus("Loading water level stations…", { hideAfter: null });
         setControlsEnabled(false);
         try {
-          const response = await fetch(API_URL);
+          const response = await fetch(buildApiUrl());
           if (!response.ok) {
             throw new Error(`Request failed (${response.status})`);
           }
