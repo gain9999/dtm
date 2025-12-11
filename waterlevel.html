@@ -169,6 +169,16 @@
         color: #ffffff !important;
       }
 
+      .popup-forecast-link {
+        display: block;
+        margin: 10px auto 0;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 400;
+        color: #0d6efd;
+        text-decoration: underline;
+      }
+
       .legend {
         position: absolute;
         bottom: 12px;
@@ -306,6 +316,59 @@
         { min: 100, label: ">100%", desc: "ล้นตลิ่ง", color: "rgb(255, 0, 0)", textColor: "#fff" },
       ];
 
+      // Allowlist verified via server-side curl (fews2 forecast files).
+      const VALID_FORECAST_KEYS = new Set([
+        "hii:BPK001",
+        "hii:BPK003",
+        "hii:BPK004",
+        "hii:BSP002",
+        "hii:CHI001",
+        "hii:CHI003",
+        "hii:CHI005",
+        "hii:CHI006",
+        "hii:CHI011",
+        "hii:CHI012",
+        "hii:CHI013",
+        "hii:CHM001",
+        "hii:CHM002",
+        "hii:CHM004",
+        "hii:CPY001",
+        "hii:CPY011",
+        "hii:CPY014",
+        "hii:KRN001",
+        "hii:KRN002",
+        "hii:MUN002",
+        "hii:MUN003",
+        "hii:MUN005",
+        "hii:MUN009",
+        "hii:MUN010",
+        "hii:MUN011",
+        "hii:MUN014",
+        "hii:NAN002",
+        "hii:NAN008",
+        "hii:NAN012",
+        "hii:NAN014",
+        "hii:NYK000",
+        "hii:PAS008",
+        "hii:PCH001",
+        "hii:PCH002",
+        "hii:PIN006",
+        "hii:PRC002",
+        "hii:PRN001",
+        "hii:TPI002",
+        "hii:TPI003",
+        "hii:TPI004",
+        "hii:TPI005",
+        "hii:TPI007",
+        "hii:TRD001",
+        "hii:WAN001",
+        "hii:WAN002",
+        "hii:WAN003",
+        "hii:YOM003",
+        "hii:YOM005",
+        "hii:YOM010",
+      ]);
+
       const setStatus = (message, { hideAfter = 2400 } = {}) => {
         if (!statusEl) return;
         statusEl.textContent = message;
@@ -436,6 +499,17 @@
         return `./index.html?${params.toString()}`;
       };
 
+      const buildForecastInfo = (station) => {
+        const agencyCode = (station.agencyShortName || "").toLowerCase();
+        if (agencyCode !== "hii" && agencyCode !== "rid") return null;
+        const stationCode = (station.stationCode || "").toString().replace(/\./g, "");
+        if (!stationCode) return null;
+        return {
+          key: `${agencyCode}:${stationCode}`,
+          url: `https://fews2.hii.or.th/model-output/data_portal/${agencyCode}_waterlevel/forecast/${stationCode}.txt`,
+        };
+      };
+
       const formatStation = (raw) => {
         const station = raw?.station ?? raw;
         const geocode = raw?.geocode ?? station?.geocode ?? {};
@@ -472,6 +546,18 @@
         const groundLevel = station?.ground_level;
         const agencyName =
           raw?.agency?.agency_name?.th ?? raw?.agency?.agency_name ?? "";
+        const agencyShortName =
+          raw?.agency?.agency_shortname?.en ??
+          raw?.agency?.agency_shortname ??
+          raw?.agency_shortname?.en ??
+          raw?.agency_shortname ??
+          "";
+        const stationCode =
+          station?.tele_station_oldcode ?? raw?.tele_station_oldcode ?? "";
+        const forecastInfo = buildForecastInfo({
+          agencyShortName,
+          stationCode,
+        });
         const updatedAt = raw?.waterlevel_datetime ?? "";
         const statusText =
           raw?.diff_wl_bank_text && raw?.diff_wl_bank
@@ -489,6 +575,10 @@
           minBank,
           groundLevel,
           agencyName,
+          agencyShortName,
+          stationCode,
+          forecastKey: forecastInfo?.key ?? null,
+          forecastUrl: forecastInfo?.url ?? null,
           updatedAt,
           statusText,
           statusColor: levelInfo?.color ?? "#6b7280",
@@ -523,6 +613,9 @@
         markerLayer.clearLayers();
         stationMarkers = stations
           .map((station) => {
+            const forecastAllowed =
+              station.forecastKey && VALID_FORECAST_KEYS.has(station.forecastKey);
+            const forecastUrl = forecastAllowed ? station.forecastUrl : null;
             const marker = L.marker([station.lat, station.lon], {
               icon: createMarkerIcon(station.levelInfo),
             }).addTo(markerLayer);
@@ -569,6 +662,7 @@
                 <a class="popup-link" href="${buildVisualizerUrl(
                   station
                 )}" target="_blank" rel="noreferrer"> ดูแผนที่น้ำท่วมด้วยระดับน้ำล่าสุด</a>
+                ${forecastUrl ? `<a class="popup-forecast-link" href="${forecastUrl}" target="_blank" rel="noreferrer">คาดการณ์ระดับน้ำ</a>` : ""}
               </div>
             `;
             marker.bindPopup(popupHtml, {
