@@ -585,18 +585,35 @@
         };
       };
 
-      const createMarkerIcon = (levelInfo) => {
+      const createMarkerIcon = (levelInfo, { hasForecast } = {}) => {
         const color = levelInfo?.color ?? "#6b7280";
         return L.divIcon({
           className: "",
-          html: `<div style="
-            width: 18px;
-            height: 18px;
-            background:${color};
-            border:1px solid rgba(0,0,0,0.2);
-            border-radius:3px;
-            box-shadow:0 0 4px rgba(0,0,0,0.25);
-          "></div>`,
+          html: `<div style="position:relative;width:18px;height:18px;">
+            <div style="
+              position:absolute;
+              inset:0;
+              background:${color};
+              border:1px solid rgba(0,0,0,0.2);
+              border-radius:3px;
+              box-shadow:0 0 4px rgba(0,0,0,0.25);
+            "></div>
+            ${
+              hasForecast
+                ? `<div style="
+                    position:absolute;
+                    top:0;
+                    right:0;
+                    width:10px;
+                    height:10px;
+                    background:#ffffff;
+                    border:2px solid #111827;
+                    border-radius:50%;
+                    box-shadow:0 0 2px rgba(0,0,0,0.3);
+                  "></div>`
+                : ""
+            }
+          </div>`,
           iconSize: [18, 18],
           iconAnchor: [9, 9],
         });
@@ -616,8 +633,10 @@
             const forecastAllowed =
               station.forecastKey && VALID_FORECAST_KEYS.has(station.forecastKey);
             const forecastUrl = forecastAllowed ? station.forecastUrl : null;
+            const hasForecastBadge =
+              forecastAllowed && (station.agencyShortName || "").toLowerCase() === "hii";
             const marker = L.marker([station.lat, station.lon], {
-              icon: createMarkerIcon(station.levelInfo),
+              icon: createMarkerIcon(station.levelInfo, { hasForecast: hasForecastBadge }),
             }).addTo(markerLayer);
             const popupHtml = `
               <div>
