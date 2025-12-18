@@ -1976,7 +1976,7 @@ function updateDeckGL() {
     }
   });
 
-  if (buildingFeatures.length > 0) {
+  if (buildingLayerEnabled && buildingFeatures.length > 0) {
     const buildingLayer = new deck.GeoJsonLayer({
       id: 'buildings',
       data: buildingFeatures,
@@ -2545,6 +2545,7 @@ map.on("overlayremove", (event) => {
     updateFloodLegendPosition();
     updateFloodSummary();
     updateAffectedBuildingsDebounced();
+    updateDeckGL();
   }
   if (event.layer === threeDRenderLayer) {
     is3DViewActive = false;
