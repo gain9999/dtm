@@ -1,6 +1,8 @@
 # Digital Terrain Model Viewer
 
-Interactive, client-side Leaflet app that streams a 30 m digital elevation model (DEM) directly from an open Cloud-Optimized GeoTIFF (COG). It lets you inspect terrain height, tune the color stretch, and compare multiple neighboring tiles without running a backend.
+Interactive, client-side Leaflet app that streams a 30 m DEM from Cloud-Optimized GeoTIFFs, colorizes and samples elevation on click, and lets you compare multiple neighboring tiles in one view. It layers flood-extent and depth analysis, search/geolocation, shareable map state, and optional building/3D overlays without a backend.
+
+![Preview](preview.jpeg)
 
 ## Features
 - Streams the GEDTM30 v1.2 DEM from OpenGeoHub via GeoTIFF.js and renders it as a colorized raster overlay.
