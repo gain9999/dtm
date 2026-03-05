@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Sea Level Rise Projections</title>
+    <link rel="stylesheet" href="./vendor/leaflet.css" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI",
+          sans-serif;
+        --bg: #0c1018;
+        --panel: rgba(11, 17, 27, 0.9);
+        --panel-border: rgba(126, 157, 191, 0.2);
+        --accent: #64d5ff;
+        --accent-strong: #2ef0c4;
+        --muted: #93a4b6;
+        --text: #f4f7fb;
+        --shadow: 0 18px 40px rgba(2, 8, 20, 0.4);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: radial-gradient(circle at top, #172235, #0b111c 45%, #05070b);
+        color: var(--text);
+      }
+
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+
+      .panel {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        width: min(360px, calc(100% - 36px));
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 16px 18px 18px;
+        box-shadow: var(--shadow);
+        z-index: 600;
+        backdrop-filter: blur(16px);
+      }
+
+      .panel h1 {
+        margin: 0 0 6px;
+        font-size: 20px;
+        letter-spacing: 0.02em;
+      }
+
+      .panel p {
+        margin: 0 0 14px;
+        font-size: 13px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      .panel .control-group {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .label-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .select {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-family: inherit;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .panel .source-link {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .panel .source-link a {
+        color: #9ef5ff;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .panel .source-link a:hover,
+      .panel .source-link a:focus-visible {
+        color: #e6feff;
+        text-decoration: underline;
+      }
+
+      .leaflet-popup-content {
+        margin: 12px;
+        font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI",
+          sans-serif;
+      }
+
+      .popup-title {
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .popup-subtitle {
+        margin: 0 0 10px;
+        font-size: 12px;
+        color: #475569;
+      }
+
+      .popup-value {
+        margin: 6px 0 12px;
+        font-size: 20px;
+        font-weight: 700;
+        color: #0f172a;
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+          Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      .popup-link {
+        display: block;
+        margin-top: 12px;
+        text-align: center;
+        background: #0b4fca;
+        color: #fff !important;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-weight: 600;
+        font-size: 12px;
+        text-decoration: none;
+      }
+
+      .popup-link-secondary {
+        display: block;
+        margin-top: 8px;
+        text-align: center;
+        background: #0f172a;
+        color: #fff !important;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-weight: 600;
+        font-size: 12px;
+        text-decoration: none;
+      }
+
+      @media (max-width: 720px) {
+        .panel {
+          position: static;
+          width: 100%;
+          border-radius: 0;
+          padding: 14px 14px 16px;
+          backdrop-filter: none;
+          box-shadow: none;
+        }
+
+        body {
+          display: flex;
+          flex-direction: column;
+        }
+
+        #map {
+          flex: 1;
+          min-height: 52vh;
+        }
+
+        .panel {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .panel h1 {
+          font-size: 18px;
+          line-height: 1.2;
+        }
+
+        .panel p {
+          font-size: 12px;
+          margin-bottom: 10px;
+        }
+
+        .label-row {
+          font-size: 11px;
+        }
+
+        .select {
+          min-height: 42px;
+          font-size: 16px;
+          padding: 10px 12px;
+        }
+
+        .leaflet-popup-content {
+          margin: 10px;
+          width: min(260px, calc(100vw - 90px));
+        }
+
+        .popup-link,
+        .popup-link-secondary {
+          min-height: 42px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .panel {
+          padding-left: max(12px, env(safe-area-inset-left));
+          padding-right: max(12px, env(safe-area-inset-right));
+        }
+
+        #map {
+          min-height: 56vh;
+        }
+
+        .leaflet-control-zoom {
+          margin-bottom: max(8px, env(safe-area-inset-bottom));
+          margin-left: max(8px, env(safe-area-inset-left));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <section class="panel">
+      <h1>IPCC 6th Assessment Report Sea Level Projections</h1>
+      <p>
+        Median projections of global and regional sea level rise, relative to a
+        1995-2014 baseline.
+      </p>
+      <p class="source-link">
+        Source:
+        <a
+          href="https://sealevel.nasa.gov/ipcc-ar6-sea-level-projection-tool"
+          target="_blank"
+          rel="noreferrer"
+        >
+          IPCC AR6 Sea Level Projection Tool
+        </a>
+      </p>
+      <p style="margin-bottom: 10px; color: var(--accent)">Total Sea Level</p>
+      <div class="control-group">
+        <div>
+          <div class="label-row">
+            <span>Data</span>
+          </div>
+          <select id="data-select" class="select"></select>
+        </div>
+        <div>
+          <div class="label-row">
+            <span>Decade</span>
+          </div>
+          <select id="decade-select" class="select"></select>
+        </div>
+        <div id="scenario-row">
+          <div class="label-row">
+            <span>Scenario</span>
+          </div>
+          <select id="scenario-select" class="select"></select>
+        </div>
+        <div id="warming-row" class="hidden">
+          <div class="label-row">
+            <span>Warming level</span>
+          </div>
+          <select id="warming-select" class="select"></select>
+        </div>
+      </div>
+    </section>
+    <script src="./vendor/leaflet.js"></script>
+    <script>
+      const GRID_STEP_DEG = 0.02;
+      const FLOOD_VIEW_GRID_RADIUS_TILES = 4;
+      const map = L.map("map", {
+        worldCopyJump: true,
+        maxZoom: 18,
+        minZoom: 2,
+        zoomControl: false,
+      }).setView([13.7563, 100.5018], 6);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map);
+
+      L.control.zoom({ position: "bottomleft" }).addTo(map);
+
+      const dataSelect = document.getElementById("data-select");
+      const decadeSelect = document.getElementById("decade-select");
+      const scenarioSelect = document.getElementById("scenario-select");
+      const warmingSelect = document.getElementById("warming-select");
+      const scenarioRow = document.getElementById("scenario-row");
+      const warmingRow = document.getElementById("warming-row");
+      const markerLayer = L.layerGroup().addTo(map);
+      const MARKER_COLOR = "#16c1ff";
+
+      const LOCAL_MARKERS_PATH = "./slr-data/nasa_markers_thailand.geojson";
+
+      const SCENARIOS = [
+        {
+          id: "ssp119",
+          label: "SSP1-1.9",
+          anchor: [
+            [2020, 0.05],
+            [2030, 0.1],
+            [2050, 0.22],
+            [2100, 0.38],
+            [2150, 0.5],
+          ],
+          spread: 0.16,
+        },
+        {
+          id: "ssp126",
+          label: "SSP1-2.6",
+          anchor: [
+            [2020, 0.06],
+            [2030, 0.12],
+            [2050, 0.27],
+            [2100, 0.44],
+            [2150, 0.6],
+          ],
+          spread: 0.18,
+        },
+        {
+          id: "ssp245",
+          label: "SSP2-4.5",
+          anchor: [
+            [2020, 0.07],
+            [2030, 0.14],
+            [2050, 0.32],
+            [2100, 0.56],
+            [2150, 0.78],
+          ],
+          spread: 0.22,
+        },
+        {
+          id: "ssp370",
+          label: "SSP3-7.0",
+          anchor: [
+            [2020, 0.08],
+            [2030, 0.16],
+            [2050, 0.37],
+            [2100, 0.69],
+            [2150, 0.98],
+          ],
+          spread: 0.26,
+        },
+        {
+          id: "ssp585",
+          label: "SSP5-8.5",
+          anchor: [
+            [2020, 0.09],
+            [2030, 0.18],
+            [2050, 0.42],
+            [2100, 0.77],
+            [2150, 1.1],
+          ],
+          spread: 0.3,
+        },
+      ];
+
+      let activePopup = null;
+      let activePopupData = null;
+      let activePopupMarker = null;
+      let markerPoints = [];
+      let projectionCsvCache = new Map();
+
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+      const interpolateAnchor = (anchor, year) => {
+        const sorted = [...anchor].sort((a, b) => a[0] - b[0]);
+        if (year <= sorted[0][0]) return sorted[0][1];
+        if (year >= sorted[sorted.length - 1][0])
+          return sorted[sorted.length - 1][1];
+        for (let i = 0; i < sorted.length - 1; i += 1) {
+          const [y0, v0] = sorted[i];
+          const [y1, v1] = sorted[i + 1];
+          if (year >= y0 && year <= y1) {
+            const t = (year - y0) / (y1 - y0);
+            return v0 + (v1 - v0) * t;
+          }
+        }
+        return sorted[sorted.length - 1][1];
+      };
+
+      const regionalAdjustment = (lat, lon) => {
+        const latRad = (lat * Math.PI) / 180;
+        const lonRad = (lon * Math.PI) / 180;
+        const wave =
+          0.12 * Math.sin(latRad) + 0.06 * Math.cos(lonRad * 2) +
+          0.04 * Math.sin(lonRad / 2);
+        return wave;
+      };
+
+      const getProjection = (lat, lon, scenarioInput, year) => {
+        const scenario =
+          typeof scenarioInput === "string"
+            ? SCENARIOS.find((item) => item.id === scenarioInput)
+            : scenarioInput;
+        if (!scenario) return null;
+        const globalMean = interpolateAnchor(scenario.anchor, year);
+        const regional = regionalAdjustment(lat, lon);
+        const median = Math.max(0, globalMean + regional);
+        const spread = scenario.spread;
+        const likelyLow = Math.max(0, median - spread * 0.6);
+        const likelyHigh = median + spread * 0.6;
+        return {
+          median,
+          likelyLow,
+          likelyHigh,
+          globalMean,
+          scenario,
+        };
+      };
+
+      const buildWarmingScenario = (warmingLevel) => {
+        const base = SCENARIOS.find((item) => item.id === "ssp245");
+        if (!base) return null;
+        const offset = (warmingLevel - 2.0) * 0.12;
+        return {
+          ...base,
+          label: `${warmingLevel.toFixed(1)}°C`,
+          anchor: base.anchor.map(([year, value]) => [year, value + offset]),
+        };
+      };
+
+      const getActiveScenario = () => {
+        if (dataSelect.value === "warming") {
+          const label = warmingSelect.selectedOptions[0]?.textContent || "";
+          const level = Number.parseFloat(label);
+          return Number.isFinite(level) ? buildWarmingScenario(level) : null;
+        }
+        return SCENARIOS.find((item) => item.id === scenarioSelect.value);
+      };
+
+      const asNumber = (value) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+
+      const readJsonResponse = async (response) => {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          return response.json();
+        }
+        const text = await response.text();
+        return JSON.parse(text);
+      };
+
+      const parseMarkerPayload = (payload) => {
+        if (!payload || !Array.isArray(payload.features)) return [];
+        const out = [];
+        payload.features.forEach((feature) => {
+          const props = feature?.properties || {};
+          const coords = feature?.geometry?.coordinates || [];
+          const psmId = props.psmsl_id ?? props.psmslId ?? null;
+          const lon = asNumber(coords[0]);
+          const lat = asNumber(coords[1]);
+          if (psmId == null || lat == null || lon == null) return;
+          out.push({
+            psmslId: String(psmId),
+            lat,
+            lon,
+            title: String(props.name || `PSMSL ${psmId}`),
+            subtitle: props.country ? String(props.country) : "",
+          });
+        });
+        return out;
+      };
+
+      const getColor = (value) => {
+        const clamped = clamp(value, 0, 1.2);
+        const t = clamped / 1.2;
+        const hue = 200 - 160 * t;
+        return `hsl(${hue}, 85%, 55%)`;
+      };
+
+      const alignToGrid = (value) =>
+        Math.floor(value / GRID_STEP_DEG) * GRID_STEP_DEG;
+
+      const buildTileBounds = (lat, lon) => {
+        const south = alignToGrid(lat);
+        const west = alignToGrid(lon);
+        const north = south + GRID_STEP_DEG;
+        const east = west + GRID_STEP_DEG;
+        return { south, west, north, east };
+      };
+
+      const buildTileKeysAroundPoint = (lat, lon, radiusTiles) => {
+        const center = buildTileBounds(lat, lon);
+        const tiles = [];
+        for (let y = -radiusTiles; y <= radiusTiles; y += 1) {
+          for (let x = -radiusTiles; x <= radiusTiles; x += 1) {
+            const south = center.south + y * GRID_STEP_DEG;
+            const west = center.west + x * GRID_STEP_DEG;
+            const north = south + GRID_STEP_DEG;
+            const east = west + GRID_STEP_DEG;
+            tiles.push(
+              [south, west, north, east].map((v) => v.toFixed(5)).join(",")
+            );
+          }
+        }
+        return tiles.join("|");
+      };
+
+      const buildVisualizerUrl = ({ lat, lon, waterLevel }) => {
+        const tilesParam = buildTileKeysAroundPoint(
+          lat,
+          lon,
+          FLOOD_VIEW_GRID_RADIUS_TILES
+        );
+        const params = new URLSearchParams({
+          lat: lat.toFixed(5),
+          lon: lon.toFixed(5),
+          z: "13",
+          water: waterLevel.toFixed(2),
+          base: "0",
+          baselayer: "satellite",
+          gba: "0",
+          tiles: tilesParam,
+        });
+        return `./index.html?${params.toString()}`;
+      };
+
+      const buildTimeseriesUrl = (marker) => {
+        const dataLayer = dataSelect.value === "warming" ? "warming" : "scenario";
+        const params = new URLSearchParams({
+          psmsl_id: String(marker.psmslId),
+          data_layer: dataLayer,
+        });
+        return `https://sealevel.nasa.gov/ipcc-ar6-sea-level-projection-tool?${params.toString()}`;
+      };
+
+      const formatMeters = (value) => `${value.toFixed(2)} m`;
+
+      const getPopupDataLabel = () => {
+        if (dataSelect.value === "warming") {
+          return warmingSelect.selectedOptions[0]?.textContent || "Warming";
+        }
+        return scenarioSelect.selectedOptions[0]?.textContent || "Scenario";
+      };
+
+      const parseCsvLine = (line) => {
+        const out = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i += 1;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (ch === "," && !inQuotes) {
+            out.push(current);
+            current = "";
+          } else {
+            current += ch;
+          }
+        }
+        out.push(current);
+        return out;
+      };
+
+      const parseCsvRows = (text) => {
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (lines.length === 0) return [];
+        const header = parseCsvLine(lines[0]);
+        return lines.slice(1).map((line) => {
+          const cols = parseCsvLine(line);
+          const row = {};
+          header.forEach((key, idx) => {
+            row[key] = cols[idx] ?? "";
+          });
+          return row;
+        });
+      };
+
+      const getProjectionCsvRows = async (psmslId, dataLayer) => {
+        const key = `${psmslId}_${dataLayer}`;
+        if (projectionCsvCache.has(key)) {
+          return projectionCsvCache.get(key);
+        }
+        const path = `./slr-data/projections/${psmslId}_${dataLayer}_total.csv`;
+        const response = await fetch(path);
+        if (!response.ok) {
+          throw new Error(`Projection CSV load failed (${response.status}) for ${path}`);
+        }
+        const text = await response.text();
+        const rows = parseCsvRows(text);
+        projectionCsvCache.set(key, rows);
+        return rows;
+      };
+
+      const getLocalProjectionForMarker = async (marker) => {
+        const dataLayer = dataSelect.value === "warming" ? "warming" : "scenario";
+        const selectedScenario =
+          dataLayer === "warming" ? warmingSelect.value : scenarioSelect.value;
+        const selectedYear = decadeSelect.value;
+        const rows = await getProjectionCsvRows(marker.psmslId, dataLayer);
+        const match = (row, quantile) => {
+          const confidence = String(row.confidence || "").toLowerCase();
+          const scenario = String(row.scenario || "").toLowerCase();
+          const q = asNumber(row.quantile);
+          return (
+            confidence === "medium" &&
+            scenario === String(selectedScenario).toLowerCase() &&
+            q === quantile
+          );
+        };
+        const row50 = rows.find((row) => match(row, 50));
+        if (!row50) return null;
+        const median = asNumber(row50[selectedYear]);
+        if (median == null) return null;
+        const row17 = rows.find((row) => match(row, 17));
+        const row83 = rows.find((row) => match(row, 83));
+        const likelyLow = row17 ? asNumber(row17[selectedYear]) : null;
+        const likelyHigh = row83 ? asNumber(row83[selectedYear]) : null;
+        return {
+          median,
+          likelyLow,
+          likelyHigh,
+          globalMean: null,
+        };
+      };
+
+      const getFallbackProjection = (marker) => {
+        const scenario = getActiveScenario();
+        const year = Number(decadeSelect.value);
+        return scenario ? getProjection(marker.lat, marker.lon, scenario, year) : null;
+      };
+
+      const buildPopupHtml = (marker, projection) => {
+        if (!projection) return "";
+        const dataLabel = getPopupDataLabel();
+        const decadeLabel = decadeSelect.selectedOptions[0]?.textContent || decadeSelect.value;
+        const html = `
+          <div>
+            <div class="popup-title">${marker.title || "Projection Point"}</div>
+            <div class="popup-subtitle">${
+              marker.subtitle ||
+              `Lat ${marker.lat.toFixed(2)}, Lon ${marker.lon.toFixed(2)}`
+            }</div>
+            <div class="popup-subtitle">Total Sea Level</div>
+            <div class="popup-subtitle">${decadeLabel}</div>
+            <div class="popup-subtitle">${dataLabel}</div>
+            <div class="popup-value">${formatMeters(projection.median)}</div>
+            <a class="popup-link" href="${buildVisualizerUrl({
+              lat: marker.lat,
+              lon: marker.lon,
+              waterLevel: projection.median,
+            })}" target="_blank" rel="noreferrer">
+              Open flood map
+            </a>
+            <a class="popup-link-secondary" href="${buildTimeseriesUrl(
+              marker
+            )}" target="_blank" rel="noreferrer">
+              View timeseries projection chart
+            </a>
+          </div>
+        `;
+        return html;
+      };
+
+      const openMarkerPopup = async (marker, leafletMarker) => {
+        activePopupData = marker;
+        activePopupMarker = leafletMarker;
+        activePopup = leafletMarker.getPopup();
+        leafletMarker.setPopupContent("Loading projection...");
+        leafletMarker.openPopup();
+        let projection = null;
+        try {
+          projection = await getLocalProjectionForMarker(marker);
+        } catch (error) {
+          projection = null;
+        }
+        if (!projection) {
+          projection = getFallbackProjection(marker);
+        }
+        if (!projection || activePopupData?.psmslId !== marker.psmslId) return;
+        leafletMarker.setPopupContent(buildPopupHtml(marker, projection));
+        leafletMarker.openPopup();
+      };
+
+      const renderNasaMarkers = (markers) => {
+        markerLayer.clearLayers();
+        markers.forEach((marker) => {
+          const leafletMarker = L.circleMarker([marker.lat, marker.lon], {
+            radius: 11,
+            color: "#0f172a",
+            weight: 1,
+            fillColor: MARKER_COLOR,
+            fillOpacity: 0.95,
+          }).addTo(markerLayer);
+          leafletMarker.bindPopup("");
+          leafletMarker.on("click", () => {
+            openMarkerPopup(marker, leafletMarker);
+          });
+        });
+      };
+
+      const loadNasaMarkers = async () => {
+        const response = await fetch(LOCAL_MARKERS_PATH);
+        if (!response.ok) {
+          throw new Error(`Marker file load failed (${response.status})`);
+        }
+        const payload = await readJsonResponse(response);
+        const markers = parseMarkerPayload(payload);
+        if (markers.length === 0) {
+          throw new Error("No markers found in local file.");
+        }
+        markerPoints = markers;
+        renderNasaMarkers(markerPoints);
+      };
+
+
+
+      const syncDataMode = () => {
+        const isWarming = dataSelect.value === "warming";
+        if (scenarioRow) scenarioRow.classList.toggle("hidden", isWarming);
+        if (warmingRow) warmingRow.classList.toggle("hidden", !isWarming);
+      };
+
+      const refreshOpenPopup = () => {
+        if (activePopupData && activePopupMarker) {
+          openMarkerPopup(activePopupData, activePopupMarker);
+        }
+      };
+
+      SCENARIOS.forEach((scenario) => {
+        const option = document.createElement("option");
+        option.value = scenario.id;
+        option.textContent = scenario.label;
+        scenarioSelect.appendChild(option);
+      });
+
+      const DATA_OPTIONS = [
+        { id: "scenario", label: "Scenario" },
+        { id: "warming", label: "Warming level" },
+      ];
+      DATA_OPTIONS.forEach((optionData) => {
+        const option = document.createElement("option");
+        option.value = optionData.id;
+        option.textContent = optionData.label;
+        dataSelect.appendChild(option);
+      });
+
+      const DECADES = [
+        2020, 2030, 2040, 2050, 2060, 2070, 2080, 2090,
+        2100, 2110, 2120, 2130, 2140, 2150,
+      ];
+      DECADES.forEach((decade) => {
+        const option = document.createElement("option");
+        option.value = String(decade);
+        option.textContent = String(decade);
+        decadeSelect.appendChild(option);
+      });
+
+      const WARMING_LEVELS = [
+        { value: "tlim1.5win0.25", label: "1.5°C" },
+        { value: "tlim2.0win0.25", label: "2.0°C" },
+        { value: "tlim3.0win0.25", label: "3.0°C" },
+        { value: "tlim4.0win0.25", label: "4.0°C" },
+        { value: "tlim5.0win0.25", label: "5.0°C" },
+      ];
+      WARMING_LEVELS.forEach((level) => {
+        const option = document.createElement("option");
+        option.value = level.value;
+        option.textContent = level.label;
+        warmingSelect.appendChild(option);
+      });
+
+      dataSelect.value = "scenario";
+      scenarioSelect.value = "ssp245";
+      decadeSelect.value = "2050";
+      warmingSelect.value = "tlim1.5win0.25";
+      syncDataMode();
+
+      scenarioSelect.addEventListener("change", () => {
+        refreshOpenPopup();
+        renderNasaMarkers(markerPoints);
+      });
+
+      warmingSelect.addEventListener("change", () => {
+        refreshOpenPopup();
+        renderNasaMarkers(markerPoints);
+      });
+
+      dataSelect.addEventListener("change", () => {
+        syncDataMode();
+        refreshOpenPopup();
+        renderNasaMarkers(markerPoints);
+      });
+
+      decadeSelect.addEventListener("change", () => {
+        refreshOpenPopup();
+        renderNasaMarkers(markerPoints);
+      });
+
+      map.on("popupclose", () => {
+        activePopup = null;
+        activePopupData = null;
+        activePopupMarker = null;
+      });
+
+      loadNasaMarkers().catch((error) => {
+        console.error(error);
+      });
+    </script>
+  </body>
+</html>

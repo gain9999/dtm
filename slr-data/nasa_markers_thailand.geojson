@@ -1,0 +1,159 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          99.816666,
+          11.8
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "KO LAK",
+        "psmsl_id": 174,
+        "url": "https://www.psmsl.org/data/obtaining/stations/174.php",
+        "coastline_code": 600,
+        "station_code": 21,
+        "country": "Thailand",
+        "time_span_of_data": "1940 – 2020",
+        "completeness": 97.0,
+        "date_of_last_update": "23 Jun 2021"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          100.583336,
+          13.55
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "FORT PHRACHULA CHOMKLAO (POM PHRACHUN)",
+        "psmsl_id": 444,
+        "url": "https://www.psmsl.org/data/obtaining/stations/444.php",
+        "coastline_code": 600,
+        "station_code": 41,
+        "country": "Thailand",
+        "time_span_of_data": "1940 – 2020",
+        "completeness": 95.0,
+        "date_of_last_update": "23 Jun 2021"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          98.433334,
+          7.833333
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "KO TAPHAO NOI",
+        "psmsl_id": 446,
+        "url": "https://www.psmsl.org/data/obtaining/stations/446.php",
+        "coastline_code": 545,
+        "station_code": 1,
+        "country": "Thailand",
+        "time_span_of_data": "1940 – 2020",
+        "completeness": 94.0,
+        "date_of_last_update": "23 Jun 2021"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          100.816666,
+          13.15
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "KO SICHANG",
+        "psmsl_id": 449,
+        "url": "https://www.psmsl.org/data/obtaining/stations/449.php",
+        "coastline_code": 600,
+        "station_code": 51,
+        "country": "Thailand",
+        "time_span_of_data": "1940 – 2002",
+        "completeness": 95.0,
+        "date_of_last_update": "28 May 2003"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          99.76417,
+          6.430833
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "PULAU LANGKAWI",
+        "psmsl_id": 1676,
+        "url": "https://www.psmsl.org/data/obtaining/stations/1676.php",
+        "coastline_code": 550,
+        "station_code": 2,
+        "country": "Malaysia",
+        "time_span_of_data": "1986 – 2018",
+        "completeness": 96.0,
+        "date_of_last_update": "11 Sep 2019"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          102.10667,
+          6.226389
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "GETING",
+        "psmsl_id": 1703,
+        "url": "https://www.psmsl.org/data/obtaining/stations/1703.php",
+        "coastline_code": 550,
+        "station_code": 21,
+        "country": "Malaysia",
+        "time_span_of_data": "1987 – 2017",
+        "completeness": 98.0,
+        "date_of_last_update": "09 Jul 2019"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          99.25,
+          10.45
+        ]
+      },
+      "properties": {
+        "type": "tide_gauge",
+        "name": "KO MATTAPHON",
+        "psmsl_id": 1792,
+        "url": "https://www.psmsl.org/data/obtaining/stations/1792.php",
+        "coastline_code": 600,
+        "station_code": 11,
+        "country": "Thailand",
+        "time_span_of_data": "1992 – 2020",
+        "completeness": 95.0,
+        "date_of_last_update": "23 Jun 2021"
+      }
+    }
+  ]
+}
