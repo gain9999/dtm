@@ -9,6 +9,10 @@ const GBA_LAYER_NAME = "global3D:lod1_global";
 const GBA_SRS = "EPSG:4326";
 const GBA_PAGE_SIZE = 500;
 const GBA_SORT_FIELD = "ogc_fid";
+const TERRAIN_TEXTURE_SIZE = 1024;
+const TERRAIN_MAX_ENCODED_HEIGHT = 16777215;
+const TERRAIN_MESH_MAX_ERROR = 1;
+const TERRAIN_VERTICAL_EXAGGERATION = 1;
 
 const statusEl = document.getElementById("status");
 const legendNoteEl = document.getElementById("legend-note");
@@ -1636,6 +1640,180 @@ const generateOverlayDataUrl = (
   };
 };
 
+const buildSatelliteExportUrl = (bounds, size = TERRAIN_TEXTURE_SIZE) => {
+  const [[south, west], [north, east]] = bounds;
+  const params = new URLSearchParams({
+    bbox: [west, south, east, north].join(","),
+    bboxSR: "4326",
+    imageSR: "4326",
+    size: `${size},${size}`,
+    format: "png",
+    transparent: "false",
+    f: "image",
+  });
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?${params.toString()}`;
+};
+
+const projectTerrainBounds = (bounds) => {
+  const [[south, west], [north, east]] = bounds;
+  return [west, south, east, north];
+};
+
+const canMergeTerrainTiles = (tileData) =>
+  Number.isFinite(tileData?.originRow) &&
+  Number.isFinite(tileData?.originCol) &&
+  Number.isFinite(tileData?.width) &&
+  Number.isFinite(tileData?.height) &&
+  Number.isFinite(tileData?.pixelWidth) &&
+  Number.isFinite(tileData?.pixelHeight) &&
+  Number.isFinite(tileData?.rasterMinX) &&
+  Number.isFinite(tileData?.rasterMaxY);
+
+const terrainTilesTouch = (a, b) => {
+  if (!canMergeTerrainTiles(a) || !canMergeTerrainTiles(b)) return false;
+  const aWest = a.originCol;
+  const aEast = a.originCol + a.width;
+  const aNorth = a.originRow;
+  const aSouth = a.originRow + a.height;
+  const bWest = b.originCol;
+  const bEast = b.originCol + b.width;
+  const bNorth = b.originRow;
+  const bSouth = b.originRow + b.height;
+  return (
+    aWest <= bEast &&
+    aEast >= bWest &&
+    aNorth <= bSouth &&
+    aSouth >= bNorth
+  );
+};
+
+const groupTerrainTiles = (tileDatas) => {
+  const groups = [];
+  const ungrouped = [...tileDatas];
+
+  while (ungrouped.length > 0) {
+    const group = [ungrouped.shift()];
+    for (let i = 0; i < group.length; i += 1) {
+      for (let j = ungrouped.length - 1; j >= 0; j -= 1) {
+        if (terrainTilesTouch(group[i], ungrouped[j])) {
+          group.push(ungrouped.splice(j, 1)[0]);
+        }
+      }
+    }
+    groups.push(group);
+  }
+
+  return groups;
+};
+
+const createMergedTerrainTile = (tileGroup) => {
+  if (
+    tileGroup.length === 1 ||
+    tileGroup.some((tile) => !canMergeTerrainTiles(tile))
+  ) {
+    return tileGroup[0];
+  }
+
+  const minRow = tileGroup.reduce(
+    (acc, tile) => Math.min(acc, tile.originRow),
+    Infinity
+  );
+  const minCol = tileGroup.reduce(
+    (acc, tile) => Math.min(acc, tile.originCol),
+    Infinity
+  );
+  const maxRow = tileGroup.reduce(
+    (acc, tile) => Math.max(acc, tile.originRow + tile.height),
+    -Infinity
+  );
+  const maxCol = tileGroup.reduce(
+    (acc, tile) => Math.max(acc, tile.originCol + tile.width),
+    -Infinity
+  );
+  const width = maxCol - minCol;
+  const height = maxRow - minRow;
+  const values = new Float32Array(width * height);
+  values.fill(Number.NaN);
+
+  let min = Infinity;
+  let max = -Infinity;
+  for (const tile of tileGroup) {
+    const rowOffset = tile.originRow - minRow;
+    const colOffset = tile.originCol - minCol;
+    for (let row = 0; row < tile.height; row += 1) {
+      const sourceStart = row * tile.width;
+      const targetStart = (rowOffset + row) * width + colOffset;
+      values.set(
+        tile.values.subarray(sourceStart, sourceStart + tile.width),
+        targetStart
+      );
+    }
+    min = Math.min(min, tile.min);
+    max = Math.max(max, tile.max);
+  }
+
+  const reference = tileGroup[0];
+  const west = reference.rasterMinX + minCol * reference.pixelWidth;
+  const east = reference.rasterMinX + maxCol * reference.pixelWidth;
+  const north = reference.rasterMaxY - minRow * reference.pixelHeight;
+  const south = reference.rasterMaxY - maxRow * reference.pixelHeight;
+
+  return {
+    values,
+    width,
+    height,
+    min,
+    max,
+    bounds: [
+      [south, west],
+      [north, east],
+    ],
+    noData: Number.NaN,
+  };
+};
+
+const createTerrainElevationData = (tileData) => {
+  if (tileData.terrainElevationData) return tileData.terrainElevationData;
+
+  const { values, width, height, min, max, noData } = tileData;
+  const range = Math.max(1e-6, max - min);
+  const encodeScale = TERRAIN_MAX_ENCODED_HEIGHT / range;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.createImageData(width, height);
+  const out = imageData.data;
+
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    const safeValue =
+      Number.isFinite(value) && value !== noData ? value : min;
+    const encoded = clamp(
+      Math.round((safeValue - min) * encodeScale),
+      0,
+      TERRAIN_MAX_ENCODED_HEIGHT
+    );
+    const offset = i * 4;
+    out[offset] = (encoded >> 16) & 255;
+    out[offset + 1] = (encoded >> 8) & 255;
+    out[offset + 2] = encoded & 255;
+    out[offset + 3] = 255;
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  tileData.terrainElevationData = {
+    url: canvas.toDataURL("image/png"),
+    decoder: {
+      rScaler: (65536 / encodeScale) * TERRAIN_VERTICAL_EXAGGERATION,
+      gScaler: (256 / encodeScale) * TERRAIN_VERTICAL_EXAGGERATION,
+      bScaler: (1 / encodeScale) * TERRAIN_VERTICAL_EXAGGERATION,
+      offset: min,
+    },
+  };
+  return tileData.terrainElevationData;
+};
+
 const applyOverlayFromTile = (tileData, cacheKey = boundsKey(tileData.bounds)) => {
   if (!tileData) return;
   const existing = findOverlayByKey(cacheKey);
@@ -1910,7 +2088,14 @@ function initializeDeckGL() {
   deckgl = new deck.DeckGL({
     container: deckContainer,
     viewState: currentViewState,
-    controller: true,
+    views: new deck.MapView({
+      clear: true,
+      clearColor: [0, 0, 0, 255],
+    }),
+    controller: {
+      minPitch: 0,
+      maxPitch: 85,
+    },
     layers: [],
     onViewStateChange: ({ viewState }) => {
        currentViewState = viewState;
@@ -1995,6 +2180,31 @@ function updateDeckGL() {
   }
 
   if (allTileDatas.length > 0) {
+    if (currentBaseLayerId === "satellite" && deck.TerrainLayer) {
+      const terrainTiles = groupTerrainTiles(allTileDatas).map(
+        createMergedTerrainTile
+      );
+      for (const terrainTile of terrainTiles) {
+        const terrainData = createTerrainElevationData(terrainTile);
+        layers.push(
+          new deck.TerrainLayer({
+            id: `satellite-terrain-${boundsKey(terrainTile.bounds)}`,
+            elevationData: terrainData.url,
+            texture: buildSatelliteExportUrl(terrainTile.bounds),
+            bounds: projectTerrainBounds(terrainTile.bounds),
+            elevationDecoder: terrainData.decoder,
+            meshMaxError: TERRAIN_MESH_MAX_ERROR,
+            material: {
+              ambient: 0.55,
+              diffuse: 0.45,
+              shininess: 8,
+              specularColor: [40, 40, 40],
+            },
+          })
+        );
+      }
+    }
+
     const floodPolygons = [];
     const floodMaskMap = buildFloodMaskMap(allTileDatas, riverLevel);
 
@@ -2039,6 +2249,9 @@ function updateDeckGL() {
         getFillColor: d => d.color,
         extruded: true,
         getElevation: d => d.depth,
+        parameters: {
+          depthTest: false,
+        },
       });
       layers.push(floodLayer);
     }
@@ -2526,14 +2739,6 @@ map.on("overlayadd", (event) => {
     is3DViewActive = true;
     initializeDeckGL();
     updateDeckGL();
-    // If buildings are not enabled, enable them in 3D view
-    if (!buildingLayerEnabled) {
-      setTimeout(() => {
-        if (!map.hasLayer(buildingLayerGroup)) {
-          map.addLayer(buildingLayerGroup);
-        }
-      }, 0);
-    }
   }
 });
 

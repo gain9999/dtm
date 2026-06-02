@@ -15,8 +15,8 @@ Interactive, client-side Leaflet app that streams a 30 m DEM from Cloud-Optimi
 - Multi-select is always on so you can compare several DEM tiles at once, with aggregated stats in the legend.
 - Download progress indicator with byte-based tracking so large tiles feel responsive.
 - Optional Global Building Atlas overlay (off by default) that you can toggle from the layer control; when enabled, clicking a building shows height and ground elevation, and the flood summary lists affected buildings that intersect the current flood mask.
-- 3D view overlay (deck.gl) that extrudes buildings and flood depths, with rotate-left/right buttons that appear when 3D is enabled.
-- Base layer switcher (OSM streets vs Esri world imagery) in the Leaflet layer control.
+- 3D view overlay (deck.gl) that extrudes buildings and flood depths, with rotate-left/right buttons that appear when 3D is enabled. When the "satellite" base layer is active, the 3D view renders a high-resolution 3D terrain model using elevation data from the DEM and textures from Esri World Imagery.
+- Base layer switcher (OSM streets vs Esri world imagery) in the Leaflet layer control. Satellite imagery is used as a texture for 3D terrain when enabled.
 - Share button copies a URL with map center/zoom, opacity, water/base levels, min river cells, max-stretch slider, selected tiles, base layer, and overlay state.
 - Separate Thai water level station explorer with search, status legend, geolocation, and deep links into the DTM viewer.
 
