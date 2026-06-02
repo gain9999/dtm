@@ -2176,6 +2176,7 @@ function updateDeckGL() {
         layers.push(
           new deck.TerrainLayer({
             id: `satellite-terrain-${boundsKey(terrainTile.bounds)}`,
+            operation: "terrain+draw",
             elevationData: terrainData.url,
             texture: buildSatelliteExportUrl(terrainTile.bounds),
             bounds: projectTerrainBounds(terrainTile.bounds),
@@ -2236,9 +2237,7 @@ function updateDeckGL() {
         getFillColor: d => d.color,
         extruded: true,
         getElevation: d => d.depth,
-        parameters: {
-          depthTest: false,
-        },
+        extensions: [new deck._TerrainExtension()],
       });
       layers.push(floodLayer);
     }
@@ -2253,9 +2252,7 @@ function updateDeckGL() {
       getFillColor: [200, 200, 200],
       getLineColor: [100, 100, 100],
       lineWidthMinPixels: 1,
-      parameters: {
-        depthTest: false,
-      },
+      extensions: [new deck._TerrainExtension()],
     });
     layers.push(buildingLayer);
   }
