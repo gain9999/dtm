@@ -2161,19 +2161,6 @@ function updateDeckGL() {
     }
   });
 
-  if (buildingLayerEnabled && buildingFeatures.length > 0) {
-    const buildingLayer = new deck.GeoJsonLayer({
-      id: 'buildings',
-      data: buildingFeatures,
-      extruded: true,
-      getElevation: f => Number(f.properties.height) || 0,
-      getFillColor: [200, 200, 200],
-      getLineColor: [100, 100, 100],
-      lineWidthMinPixels: 1,
-    });
-    layers.push(buildingLayer);
-  }
-
   const allTileDatas = overlays.map(entry => entry.tileData);
   if (allTileDatas.length === 0 && currentTileData) {
     allTileDatas.push(currentTileData);
@@ -2257,6 +2244,21 @@ function updateDeckGL() {
     }
   }
 
+  if (buildingLayerEnabled && buildingFeatures.length > 0) {
+    const buildingLayer = new deck.GeoJsonLayer({
+      id: 'buildings',
+      data: buildingFeatures,
+      extruded: true,
+      getElevation: f => Number(f.properties.height) || 0,
+      getFillColor: [200, 200, 200],
+      getLineColor: [100, 100, 100],
+      lineWidthMinPixels: 1,
+      parameters: {
+        depthTest: false,
+      },
+    });
+    layers.push(buildingLayer);
+  }
 
   deckgl.setProps({ layers });
 }
