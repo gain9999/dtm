@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- thaiwater.net's WAF answers 429 to API calls that carry a Referer from
+         another site, so never send one (see the fetch below too). -->
+    <meta name="referrer" content="no-referrer" />
     <title>Thai Water Level Stations</title>
     <link rel="stylesheet" href="./vendor/leaflet.css" />
     <style>
@@ -716,15 +719,41 @@
           .filter(Boolean);
       };
 
+      // thaiwater.net's WAF rejects API calls that arrive with a Referer from a
+      // foreign site (it answers 429), so the request must not carry one and a
+      // brief backoff covers any transient rate limit.
+      const fetchStations = async () => {
+        const response = await fetch(buildApiUrl(), {
+          referrerPolicy: "no-referrer",
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          const error = new Error(`Request failed (${response.status})`);
+          error.status = response.status;
+          throw error;
+        }
+        return response.json();
+      };
+
+      const fetchStationsWithRetry = async (attempts = 3) => {
+        let lastError = null;
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          try {
+            return await fetchStations();
+          } catch (error) {
+            lastError = error;
+            if (attempt === attempts) break;
+            await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
+          }
+        }
+        throw lastError;
+      };
+
       const loadStations = async () => {
         setStatus("Loading water level stations…", { hideAfter: null });
         setControlsEnabled(false);
         try {
-          const response = await fetch(buildApiUrl());
-          if (!response.ok) {
-            throw new Error(`Request failed (${response.status})`);
-          }
-          const data = await response.json();
+          const data = await fetchStationsWithRetry();
           const rows = extractRows(data);
           const stations = rows
             .map((row) => formatStation(row))
@@ -738,7 +767,12 @@
           setControlsEnabled(true);
         } catch (error) {
           console.error(error);
-          setStatus("Failed to load stations. See console for details.", {
+          const detail = error?.status ? ` (HTTP ${error.status})` : "";
+          const hint =
+            error?.status === 429
+              ? " Try again in a minute."
+              : " See console for details.";
+          setStatus(`Failed to load stations${detail}.${hint}`, {
             hideAfter: null,
           });
         }
